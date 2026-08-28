@@ -1,0 +1,65 @@
+# CONVEX thresholds. Hot-loadable: every read goes through convex.config.load(),
+# which re-reads this file when its mtime changes, so a running session picks up
+# an edit at the next decision cycle without a restart.
+#
+# Law 1: every number here that describes the market is a hypothesis until it has
+# been measured against the live paper API. Values marked MEASURED carry the date
+# they were measured and the script that produced them. Values marked HYPOTHESIS
+# have not been measured yet and must not be relied on in a live decision.
+
+underlying:
+  symbol: SPY
+  contract_multiplier: 100          # MEASURED at runtime from the contract record
+
+session:
+  timezone: America/New_York
+  entry_time: "10:00"               # the paper's main specification
+  close_time: "16:00"
+  assignment_guard_minutes: 30      # no in-the-money short may be held inside this
+
+candidates:
+  # The paper's 0.98-1.02 moneyness band, expressed as a fraction of spot so it
+  # translates from SPX to SPY without carrying absolute point widths across.
+  moneyness_low: 0.98
+  moneyness_high: 1.02
+  min_wing_width_pct: 0.002         # narrowest wing worth trading, fraction of spot
+  max_wing_width_pct: 0.020
+  max_candidates_per_structure: 400
+
+costs:
+  # Law 7. Populated by scripts/calibrate_costs.py against real SPY 0DTE quotes.
+  slippage_ticks_per_leg: 1.0       # HYPOTHESIS: ticks of adverse fill beyond mid
+  tick_size: 0.01                   # MEASURED at runtime from quote increments
+  per_contract_fee: 0.0             # HYPOTHESIS: Alpaca options commission
+  regulatory_fee_per_contract: 0.0  # HYPOTHESIS: OCC/ORF/exchange pass-through
+  exit_reserve_legs: short          # legs assumed to need closing: short | all | none
+
+liquidity:
+  max_relative_spread: 0.25         # HYPOTHESIS until measured: (ask-bid)/mid per leg
+  min_displayed_size: 1             # contracts on the touch
+  max_quote_age_seconds: 30         # feature-staleness budget
+
+classifier:
+  min_train_days: 60                # burn-in below which the rule fallback runs instead
+  confidence_band: 0.03             # stand down when |p - 0.5| falls inside this
+  l2_c: 1.0                         # inverse regularisation strength
+
+risk:
+  risk_pct_per_structure: 0.01      # 1% of equity
+  max_concurrent_structures: 4
+  portfolio_es_cap_pct: 0.03        # projected portfolio ES(1%) ceiling
+  daily_loss_limit_pct: 0.03
+  cumulative_fee_budget_pct: 0.02
+  es_confidence: 0.01               # the 1% in ES(1%)
+
+structures:
+  # Relative weighting is not a size multiplier (Law 11 forbids that). It is the
+  # order in which equally ranked candidates break ties, reflecting the paper's
+  # finding that call ratio structures are weaker than put ratio structures.
+  enabled: [put_bwb, call_bwb, straddle, strangle, debit_vertical]
+  tie_break_order: [put_bwb, debit_vertical, straddle, strangle, call_bwb]
+
+paths:
+  ledger: data/ledger/decisions.jsonl
+  chain_archive: data/chains
+  kill_switch: data/KILL

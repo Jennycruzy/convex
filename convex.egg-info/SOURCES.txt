@@ -1,0 +1,6 @@
+pyproject.toml
+convex.egg-info/PKG-INFO
+convex.egg-info/SOURCES.txt
+convex.egg-info/dependency_links.txt
+convex.egg-info/requires.txt
+convex.egg-info/top_level.txt
