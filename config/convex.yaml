@@ -11,6 +11,14 @@ underlying:
   symbol: SPY
   contract_multiplier: 100          # MEASURED at runtime from the contract record
 
+data:
+  # Which Alpaca feeds this account is entitled to. Set once, verified on the
+  # first call: an entitlement the account does not have fails loudly rather
+  # than silently degrading to a thinner feed.
+  options_feed: indicative     # indicative | opra
+  stock_feed: iex              # iex | sip
+  scenario_lookback_days: 750  # history used to build the terminal distribution
+
 session:
   timezone: America/New_York
   entry_time: "10:00"               # the paper's main specification

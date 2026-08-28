@@ -75,3 +75,53 @@ def put_bwb_legs() -> list[Leg]:
         leg(645.0, Right.PUT, 1.60, 1.70, -2),
         leg(635.0, Right.PUT, 0.40, 0.48, +1),
     ]
+
+
+def _black_scholes(spot: float, strike: float, sigma: float, tau: float, right: Right) -> float:
+    """A closed-form price used to build arbitrage-free test chains.
+
+    This is not a stand-in for Alpaca. It exists so that tests of the candidate
+    builders and the edge calculation run on a strike grid whose prices are
+    mutually consistent, which hand-typed prices across thirty strikes would
+    not be. Anything that needs real quotes runs against the paper account.
+    """
+    from math import log, sqrt
+
+    from scipy.stats import norm
+
+    d1 = (log(spot / strike) + 0.5 * sigma**2 * tau) / (sigma * sqrt(tau))
+    d2 = d1 - sigma * sqrt(tau)
+    if right is Right.CALL:
+        return spot * norm.cdf(d1) - strike * norm.cdf(d2)
+    return strike * norm.cdf(-d2) - spot * norm.cdf(-d1)
+
+
+def build_test_chain(
+    spot: float = 650.0,
+    strikes: range | None = None,
+    sigma: float = 0.16,
+    tau: float = 6.0 / (252.0 * 6.5),
+    half_spread: float = 0.03,
+) -> list[ChainEntry]:
+    """A consistent one-dollar SPY strike grid with a fixed half-spread."""
+    grid = strikes if strikes is not None else range(630, 671)
+    rows: list[ChainEntry] = []
+    for strike in grid:
+        for right in (Right.CALL, Right.PUT):
+            fair = _black_scholes(spot, float(strike), sigma, tau, right)
+            bid = max(round(fair - half_spread, 2), 0.01)
+            rows.append(
+                entry(
+                    float(strike),
+                    right,
+                    bid,
+                    round(bid + 2 * half_spread, 2),
+                    greeks=Greeks(0.5, 0.01, -50.0, 0.1, 0.0, sigma),
+                )
+            )
+    return rows
+
+
+@pytest.fixture
+def test_chain() -> list[ChainEntry]:
+    return build_test_chain()
