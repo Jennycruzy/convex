@@ -25,7 +25,7 @@ import os
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
-from typing import Any, Iterable, Sequence
+from typing import Any, Iterable, Iterator, Sequence
 from zoneinfo import ZoneInfo
 
 import pandas as pd
@@ -59,6 +59,15 @@ REQUIRED_TOOLS = (
 TOOLSETS = "account,trading,assets,stock-data,options-data"
 
 _MAX_BARS_PER_PAGE = 10_000
+
+# A 2% band on SPY is around sixty contracts once both rights are counted, and
+# the request goes in a query string, so the symbol list is sent in batches.
+_SYMBOLS_PER_REQUEST = 40
+
+
+def _batched(items: list[str], size: int) -> Iterator[list[str]]:
+    for start in range(0, len(items), size):
+        yield items[start : start + size]
 
 
 @dataclass(frozen=True)
@@ -507,6 +516,44 @@ class AlpacaGateway:
         if missing:
             raise DataError(f"no quote came back for {', '.join(sorted(missing))}")
         return quotes
+
+    def option_bars(
+        self, symbols: Sequence[str], start: datetime, end: datetime
+    ) -> dict[str, list[dict]]:
+        """Traded bars per contract, for rebuilding sessions that were not recorded.
+
+        This is prints, not quotes. Alpaca keeps no historical option book, so a
+        past session can only be rebuilt from what actually traded, and a print
+        is not a price anyone could have been filled at on demand. Everything
+        downstream of this is labelled reconstructed for that reason, and none
+        of it is written into the recorded-chain archive.
+
+        Unlike get_stock_bars this tool does take a page token, verified against
+        the running server rather than assumed.
+        """
+        if not symbols:
+            return {}
+        collected: dict[str, list[dict]] = {}
+        for batch in _batched(list(symbols), _SYMBOLS_PER_REQUEST):
+            page_token: str | None = None
+            while True:
+                payload: dict[str, Any] = {
+                    "symbols": ",".join(batch),
+                    "timeframe": "1Min",
+                    "start": start.isoformat(),
+                    "end": end.isoformat(),
+                    "limit": _MAX_BARS_PER_PAGE,
+                    "sort": "asc",
+                }
+                if page_token:
+                    payload["page_token"] = page_token
+                raw = self._client.call("get_option_bars", payload)
+                for symbol, bars in (raw.get("bars") or {}).items():
+                    collected.setdefault(symbol, []).extend(bars or [])
+                page_token = raw.get("next_page_token")
+                if not page_token:
+                    break
+        return collected
 
     # --------------------------------------------------------------- execution
 

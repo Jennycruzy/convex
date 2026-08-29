@@ -19,6 +19,7 @@ provenance:
     - costs.per_contract_fee
     - costs.regulatory_fee_per_contract
     - liquidity.max_relative_spread
+    - reconstruction.risk_free_rate
 
 underlying:
   symbol: SPY
@@ -65,6 +66,17 @@ liquidity:
   max_relative_spread: 0.25         # HYPOTHESIS until measured: (ask-bid)/mid per leg
   min_displayed_size: 1             # contracts on the touch
   max_quote_age_seconds: 30         # feature-staleness budget
+
+reconstruction:
+  # Rebuilding a session that was never recorded. See convex/reconstruct.py for
+  # what this can and cannot recover; the short version is prints yes, the book
+  # no. Six hours of discounting barely moves a solved 0DTE volatility, but the
+  # rate is still assumed rather than measured, so it is listed as unmeasured
+  # above. No live decision reads it, which is why the calibration check does
+  # not stand the agent down for it.
+  risk_free_rate: 0.043            # HYPOTHESIS: not measured against a curve
+  min_coverage: 0.25               # drop a session if less of its ladder printed
+  entry_time: "10:00"              # the same entry the live cycle uses
 
 classifier:
   min_train_days: 60                # burn-in below which the rule fallback runs instead

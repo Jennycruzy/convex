@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 import threading
 from concurrent.futures import TimeoutError as FutureTimeoutError
 from contextlib import AsyncExitStack
@@ -65,6 +66,16 @@ def _unwrap(payload: Any) -> Any:
 
 
 SECURITY_KEY = "_alpaca_mcp_security"
+
+# Rebuilding a year of sessions asks for far more history than a decision cycle
+# ever does, and Alpaca answers 429 long before it runs out of data.
+_RATE_LIMIT_RETRIES = 6
+_RATE_LIMIT_BACKOFF = 1.0
+
+
+def _is_rate_limit(message: str) -> bool:
+    lowered = message.lower()
+    return "429" in lowered or "too many requests" in lowered
 
 
 def _strip_security_envelope(payload: Any, tool: str) -> Any:
@@ -211,7 +222,25 @@ class McpClient:
     # --------------------------------------------------------------------- calls
 
     def call(self, tool: str, arguments: dict[str, Any] | None = None) -> Any:
-        """Invoke one tool and return its decoded payload."""
+        """Invoke one tool and return its decoded payload.
+
+        A read that is rate limited is retried with a widening pause. A write
+        never is: `place_option_order` answering 429 does not prove the order
+        was not accepted, and a retry that discovers otherwise has opened the
+        position twice. Only ``get_`` tools are replayed, and only for 429.
+        """
+        attempt = 0
+        while True:
+            try:
+                return self._call_once(tool, arguments)
+            except McpError as error:
+                retryable = tool.startswith("get_") and _is_rate_limit(str(error))
+                if not retryable or attempt >= _RATE_LIMIT_RETRIES:
+                    raise
+                time.sleep(_RATE_LIMIT_BACKOFF * (2**attempt))
+                attempt += 1
+
+    def _call_once(self, tool: str, arguments: dict[str, Any] | None = None) -> Any:
         if self._session is None or self._loop is None:
             raise McpError(f"cannot call {tool}: the MCP client has not been started")
 
