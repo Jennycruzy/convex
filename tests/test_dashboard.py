@@ -458,3 +458,63 @@ def test_every_colour_the_charts_ask_for_is_a_colour_the_palette_defines():
     defined = set(re.findall(r"^\s+(--[a-z-]+):", ui.TOKENS, re.MULTILINE))
     missing = sorted(wanted - defined)
     assert not missing, f"charts ask for undefined colours: {missing}"
+
+
+# ------------------------------------------------------------------- the log
+
+
+def test_the_log_reads_the_way_a_log_is_written(client):
+    """Oldest first, so a new session appends to the bottom.
+
+    The ordering is the whole reason this is a log rather than a table: the
+    reader's eye stays where it was and tomorrow's cycle lands underneath.
+    """
+    session, path = client
+    write(
+        path,
+        Record(action=Action.CANDIDATE_REJECTED, cycle_id="c1", structure="put_bwb",
+               reject_reason="net_of_cost", rationale="Cost ate it."),
+        Record(action=Action.ORDER_SUBMITTED, cycle_id="c2", structure="call_bwb",
+               rationale="Opened.", contracts=2),
+    )
+    page = session.get("/").text
+    assert "decision log" in page.lower()
+    # Scoped to the log itself: both structures also appear in the panels above
+    # it, so a page-wide index would be measuring the wrong thing.
+    log = page[page.index("<div class='log' data-log>"):]
+    log = log[: log.index("append-only")]
+    assert log.index("put_bwb") < log.index("call_bwb")
+
+
+def test_each_day_is_marked_once_as_it_turns(client):
+    session, path = client
+    write(
+        path,
+        Record(action=Action.STAND_DOWN, cycle_id="c1", rationale="Nothing cleared."),
+        Record(action=Action.STAND_DOWN, cycle_id="c2", rationale="Nor here."),
+    )
+    page = session.get("/").text
+    # Two entries on one day produce one day header, not two.
+    assert page.count("class='log-day'") == 1
+    assert "2 decisions" in page
+
+
+def test_the_log_scrolls_in_its_own_frame_rather_than_growing_the_page():
+    """A week of sessions has to be a scroll, not a redesign."""
+    from convex.dashboard import ui
+
+    block = ui.BASE[ui.BASE.index(".log {"):ui.BASE.index(".log::-webkit-scrollbar ")]
+    assert "overflow-y: auto" in block and "max-height" in block
+    assert "[data-log]" in ui.SCRIPT
+
+
+def test_a_refusal_carries_its_reason_into_the_log(client):
+    session, path = client
+    write(
+        path,
+        Record(action=Action.CANDIDATE_REJECTED, cycle_id="c1", structure="straddle",
+               reject_reason="liquidity", rationale="Spread too wide to cross."),
+    )
+    page = session.get("/").text
+    assert "Spread too wide to cross." in page
+    assert "refused" in page

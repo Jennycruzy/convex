@@ -351,6 +351,76 @@ button.theme-toggle:focus-visible { outline: 1px solid var(--key); outline-offse
               letter-spacing: 0.16em; color: var(--ink-faint); }
 .readout .v { font-size: 19px; color: var(--ink-hi); margin-top: 2px; }
 
+/* --------------------------------------------------------------------- log */
+
+/* The decision log. It is written the way a log is written — oldest at the
+   top, newest at the bottom, days marked as they turn — and it scrolls inside
+   its own frame rather than growing the page. That is the whole point: another
+   session appends to the bottom and the panel above it does not move, so a
+   week of trading is a scroll rather than a redesign. */
+.log {
+  max-height: 62vh;
+  min-height: 260px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: var(--sunk);
+  font-size: var(--t-small);
+  line-height: 1.5;
+  scrollbar-width: thin;
+  scrollbar-color: var(--rule-hi) transparent;
+}
+.log::-webkit-scrollbar { width: 10px; }
+.log::-webkit-scrollbar-track { background: transparent; }
+.log::-webkit-scrollbar-thumb { background: var(--rule-mid); border: 3px solid var(--sunk); }
+.log::-webkit-scrollbar-thumb:hover { background: var(--rule-hi); }
+
+/* The day turning over. Sticky, so while you are inside a session you can
+   always see which one you are inside. */
+.log-day {
+  position: sticky; top: 0; z-index: 2;
+  display: flex; align-items: center; gap: 12px;
+  padding: 7px 14px;
+  background: var(--raised);
+  border-top: 1px solid var(--rule-mid);
+  border-bottom: 1px solid var(--rule-mid);
+  color: var(--key);
+  font-size: var(--t-micro); letter-spacing: 0.18em; text-transform: uppercase;
+}
+.log-day::after { content: ""; flex: 1; height: 1px; background: var(--rule-mid); }
+.log-day .count { color: var(--ink-dim); letter-spacing: 0.1em; }
+
+.log-line {
+  display: grid;
+  grid-template-columns: 46px 68px 96px minmax(96px, 1fr) repeat(3, minmax(72px, auto));
+  gap: 10px;
+  padding: 5px 14px;
+  border-bottom: 1px solid var(--rule);
+  align-items: baseline;
+}
+.log-line:hover { background: var(--panel); }
+.log-line .seq { color: var(--ink-faint); }
+.log-line .at { color: var(--ink-dim); }
+.log-line .what { color: var(--ink-hi); }
+.log-line .fig { text-align: right; font-variant-numeric: tabular-nums; }
+.log-line .fig .k { color: var(--ink-faint); }
+
+/* The reason the agent gave, carried under the line it belongs to and indented
+   the way a continuation is indented in a terminal. */
+.log-note {
+  padding: 2px 14px 9px 60px;
+  border-bottom: 1px solid var(--rule);
+  color: var(--ink-dim);
+  max-width: 110ch;
+}
+.log-note::before { content: "> "; color: var(--key); }
+
+.log-empty { padding: 22px 14px; color: var(--ink-dim); }
+
+@media (max-width: 780px) {
+  .log-line { grid-template-columns: 44px 64px 92px 1fr; }
+  .log-line .fig { grid-column: span 1; text-align: left; }
+}
+
 /* ------------------------------------------------------------------ motion */
 
 .reveal { opacity: 0; transform: translateY(8px); }
@@ -602,6 +672,12 @@ SCRIPT = """
       start.observe(chart);
     }
   }
+
+  /* A log opens where a log is read from: the end. Jumped rather than
+     smooth-scrolled, because animating to the bottom of something the reader
+     has not looked at yet is motion for its own sake. */
+  var log = document.querySelector("[data-log]");
+  if (log) log.scrollTop = log.scrollHeight;
 
   /* The clock in the status bar. A terminal that does not tick looks frozen,
      and this is the only thing on the page that changes without a reload. */

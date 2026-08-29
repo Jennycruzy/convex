@@ -275,6 +275,7 @@ def create_app(config: Config | None = None) -> FastAPI:
 
         body.append(_masthead(summary, summary.has_run))
         body.append(_hero(summary, sensitivity()))
+        body.append("<div style='height:34px'></div>")
         body.append(
             _section(
                 "receipts",
@@ -399,37 +400,7 @@ def create_app(config: Config | None = None) -> FastAPI:
             body.append(_backtest_panel(replay))
 
         body.append("<h2>Decisions</h2>")
-        body.append("<div class='panel scroll-x reveal'><table><thead><tr>")
-        for column in (
-            "time", "outcome", "structure", "p", "net edge",
-            "max loss", "ES(1%)", "lots", "reason",
-        ):
-            body.append(f"<th>{column}</th>")
-        body.append("</tr></thead><tbody>")
-
-        shown = [
-            record for record in reversed(rows)
-            if record.get("action") in {action.value for action in read.DECISION_ACTIONS}
-        ][:60]
-        for record in shown:
-            waterfall = record.get("waterfall") or {}
-            body.append("<tr>")
-            body.append(f"<td>{escape(read.format_stamp(record.get('ts')))}</td>")
-            body.append(f"<td>{_tag(str(record.get('action', '')))}</td>")
-            body.append(f"<td>{escape(str(record.get('structure') or '—'))}</td>")
-            body.append(f"<td class='num'>{_number(record.get('probability'), 3)}</td>")
-            body.append(f"<td class='num'>{_number(waterfall.get('net_edge'))}</td>")
-            body.append(f"<td class='num'>{_number(record.get('max_loss'))}</td>")
-            body.append(f"<td class='num'>{_number(record.get('es_contribution'))}</td>")
-            body.append(f"<td class='num'>{_number(record.get('contracts'), 0)}</td>")
-            body.append(f"<td>{escape(str(record.get('reject_reason') or ''))}</td>")
-            body.append("</tr>")
-            if record.get("rationale"):
-                body.append(
-                    f"<tr><td></td><td colspan='8' class='rationale'>"
-                    f"{escape(str(record['rationale']))}</td></tr>"
-                )
-        body.append("</tbody></table></div>")
+        body.append(_decision_log(rows))
 
         return HTMLResponse(_page("".join(body)))
 
@@ -629,3 +600,86 @@ def _crossing(points: list) -> str:
     if first_negative is None:
         return f"beyond {last_positive:.1%}"
     return f"{last_positive:.1%}–{first_negative:.1%}"
+
+
+def _decision_log(rows: list[dict[str, Any]], limit: int = 500) -> str:
+    """The ledger as a log, oldest first, days marked as they turn.
+
+    Read in the direction a log is written, so a session appends to the bottom
+    and nothing above it moves. That is why it scrolls inside its own frame
+    rather than growing the page: a week of trading should be a scroll, not a
+    layout that has to be reconsidered every day.
+
+    Only the last few hundred entries are rendered. The whole thing, unedited,
+    is a request away at /api/ledger, and the panel says so.
+    """
+    wanted = {action.value for action in read.DECISION_ACTIONS}
+    entries = [record for record in rows if record.get("action") in wanted]
+    trimmed = entries[-limit:]
+
+    out = [
+        "<section class='reveal'><div class='rule'>log</div>",
+        "<div class='panel'>",
+        "<div class='panel-head'><h3>decision log</h3>",
+        f"<div><span class='stat-key'>ENTRIES</span> "
+        f"<span class='stat-val'>{len(entries)}</span>"
+        + (
+            f" <span class='faint'>(last {limit} shown)</span>"
+            if len(entries) > limit
+            else ""
+        )
+        + "</div></div>",
+        "<div class='log' data-log>",
+    ]
+
+    if not trimmed:
+        out.append(
+            "<div class='log-empty'>Nothing decided yet. Every cycle appends "
+            "here, refusals included.</div>"
+        )
+
+    day = None
+    per_day: dict[str, int] = {}
+    for record in trimmed:
+        stamp = str(record.get("ts") or "")
+        per_day[stamp[:10]] = per_day.get(stamp[:10], 0) + 1
+
+    for number, record in enumerate(trimmed, start=len(entries) - len(trimmed) + 1):
+        stamp = str(record.get("ts") or "")
+        when = stamp[:10]
+        if when != day:
+            day = when
+            out.append(
+                f"<div class='log-day'><span>{escape(when or 'undated')}</span>"
+                f"<span class='count'>{per_day.get(when, 0)} decisions</span></div>"
+            )
+        waterfall = record.get("waterfall") or {}
+        reason = str(record.get("reject_reason") or "")
+        out.append(
+            "<div class='log-line'>"
+            f"<span class='seq'>{number:04d}</span>"
+            f"<span class='at'>{escape(stamp[11:19] or '--:--:--')}</span>"
+            f"{_tag(str(record.get('action', '')))}"
+            f"<span class='what'>{escape(str(record.get('structure') or reason or '—'))}</span>"
+            f"<span class='fig'><span class='k'>p </span>"
+            f"{_number(record.get('probability'), 3, '·')}</span>"
+            f"<span class='fig'><span class='k'>net </span>"
+            f"{_number(waterfall.get('net_edge'), 2, '·')}</span>"
+            f"<span class='fig'><span class='k'>lots </span>"
+            f"{_number(record.get('contracts'), 0, '·')}</span>"
+            "</div>"
+        )
+        if record.get("rationale"):
+            out.append(
+                f"<div class='log-note'>{escape(str(record['rationale']))}</div>"
+            )
+
+    out.append("</div>")
+    out.append(
+        "<div class='panel-head' style='border-bottom:0;border-top:1px solid "
+        "var(--rule-mid)'><span class='faint'>append-only · written before the "
+        "order existed</span>"
+        "<a href='/api/ledger' class='faint'>/api/ledger</a></div>"
+    )
+    out.append("</div></section>")
+    return "".join(out)
