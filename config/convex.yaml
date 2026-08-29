@@ -75,5 +75,6 @@ structures:
 
 paths:
   ledger: data/ledger/decisions.jsonl
+  mcp_log: data/logs/alpaca-mcp.log
   chain_archive: data/chains
   kill_switch: data/KILL

@@ -32,11 +32,13 @@ def official_close(gateway: AlpacaGateway, symbol: str, session) -> float:
     where the session closed.
     """
     bars = gateway.minute_bars(symbol, session.open_at, session.close_at + timedelta(minutes=1))
-    if not bars:
+    within = bars[bars.index <= session.close_at]
+    if within.empty:
         raise ConvexError(
-            f"no {symbol} bars for {session.session_date}; the session cannot be settled"
+            f"no {symbol} bars at or before the {session.session_date} close; "
+            "the session cannot be settled"
         )
-    return float(bars[-1].close)
+    return float(within["close"].iloc[-1])
 
 
 def main() -> int:

@@ -4,7 +4,12 @@ version = "0.1.0"
 description = "Cost-aware, tail-budgeted 0DTE SPY options agent"
 requires-python = ">=3.11"
 dependencies = [
-    "alpaca-py>=0.33",
+    # The market is reached through Alpaca's MCP server, not through the SDK.
+    # fastmcp is pinned below 4 because the server imports fastmcp.tools.tool,
+    # which the 4.0 prereleases moved.
+    "alpaca-mcp-server>=2.3",
+    "fastmcp>=3.1,<4",
+    "mcp>=1.9",
     "pandas>=2.2",
     "numpy>=1.26",
     "scikit-learn>=1.5",
