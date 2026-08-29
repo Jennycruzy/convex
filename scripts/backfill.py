@@ -236,7 +236,7 @@ def main() -> int:
         # A model is only written if it beat the majority baseline out of
         # sample. Below it, the model has learned the base rate and nothing
         # else, and shipping it would put a fitted-looking thing in the live
-        # path in place of the documented rule — which is worse than the rule,
+        # path in place of the documented rule, which is worse than the rule,
         # because it looks like evidence. Standing down is the better outcome.
         skill = report[name].get("skill_over_baseline")
         needed = report[name].get("skill_required")

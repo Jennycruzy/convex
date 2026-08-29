@@ -2,7 +2,7 @@
 
 **A cost-aware, tail-budgeted 0DTE SPY options agent that reaches the market entirely through the Model Context Protocol.**
 
-Built for the lablab.ai × Alpaca *AI Trading Agents* hackathon. Paper account only — there is no live-money code path, and the gateway refuses to start if you try.
+Built for the lablab.ai × Alpaca *AI Trading Agents* hackathon. Paper account only. There is no live-money code path, and the gateway refuses to start if you try.
 
 ---
 
@@ -23,8 +23,8 @@ A long butterfly and an iron butterfly are synthetically equivalent, so the firs
 
 CONVEX does four things differently:
 
-1. **Trades skew, not variance.** Realized skewness drives 0DTE PnL more than realized variance does. The variance risk premium at 0DTE has a median of ~0.0011% of underlying from 10:00 to expiry — real, and smaller than the cost of harvesting it.
-2. **Classifies direction, not magnitude.** Per-structure binary target, L2 logistic, hard mapping — full size or nothing. The paper is explicit that a low-variance parametric model beats higher-capacity ones on short-horizon 0DTE data, so there is no neural net here and that is a deliberate finding, not a shortcut.
+1. **Trades skew, not variance.** Realized skewness drives 0DTE PnL more than realized variance does. The variance risk premium at 0DTE has a median of ~0.0011% of underlying from 10:00 to expiry: real, and smaller than the cost of harvesting it.
+2. **Classifies direction, not magnitude.** Per-structure binary target, L2 logistic, hard mapping, full size or nothing. The paper is explicit that a low-variance parametric model beats higher-capacity ones on short-horizon 0DTE data, so there is no neural net here and that is a deliberate finding, not a shortcut.
 3. **Diversifies across structure families.** The basket beat every single structure tested. Nothing concentrates into the highest-probability candidate.
 4. **Prices cost and tail risk before entry, not after.** Every candidate is ranked on edge *net* of measured half-spread per leg plus slippage. A structure that is attractive gross and unattractive net is rejected, and the rejection is written to the ledger with its arithmetic.
 
@@ -53,7 +53,7 @@ Alpaca lists equity and ETF options; index options are not available. The resear
 | Level | ~6,800 | ~$650 |
 | ±2% moneyness band | ±136 pts | **±$13** |
 
-Two consequences run through the code. Every width is expressed as a fraction of spot, never as an absolute number of points. And physical settlement means an open leg at the close can become a hundred shares of stock per contract overnight — so the assignment guard is a hard gate, not a guideline, and it has no counterpart in the paper being implemented.
+Two consequences run through the code. Every width is expressed as a fraction of spot, never as an absolute number of points. And physical settlement means an open leg at the close can become a hundred shares of stock per contract overnight, so the assignment guard is a hard gate, not a guideline, and it has no counterpart in the paper being implemented.
 
 ---
 
@@ -83,40 +83,40 @@ convex/edge.py            gross edge, net edge, expected shortfall, win rate
 convex/gates.py           fifteen checks, session-scope and candidate-scope
 convex/sizing.py          one function, no override parameter
 convex/rationale.py       the written explanation, before the order
-convex/ledger.py          append-only JSONL — every decision, including refusals
+convex/ledger.py          append-only JSONL, every decision including refusals
         │
         ▼
 convex/manager.py         hold to expiry; kill switch, loss limit, assignment guard
 ```
 
-**MCP is the entire data and execution layer.** Not a wrapper around a wrapper — the agent's only route to the market is the server Alpaca publishes, spawned over a pipe, with the toolset restricted to what this project actually trades. Two failure modes get explicit handling because they would otherwise be silent: the order tools answer with a *successful* JSON-RPC result whose body carries an error object, so every payload is inspected before it can be read as a fill; and every call carries a timeout, because a cycle that hangs at 10:00 is a cycle that misses its entry.
+**MCP is the entire data and execution layer.** Not a wrapper around a wrapper: the agent's only route to the market is the server Alpaca publishes, spawned over a pipe, with the toolset restricted to what this project actually trades. Two failure modes get explicit handling because they would otherwise be silent: the order tools answer with a *successful* JSON-RPC result whose body carries an error object, so every payload is inspected before it can be read as a fill; and every call carries a timeout, because a cycle that hangs at 10:00 is a cycle that misses its entry.
 
 ---
 
 ## The risk checks
 
-Every one must pass, and every verdict — pass or fail — is written to the ledger.
+Every one must pass, and every verdict, pass or fail, is written to the ledger.
 
 **Session scope**, run once before anything is priced:
 
-1. **Kill switch** — an append-only file, checked every cycle
-2. **Calibration** — no position is opened while any cost or liquidity input is still an unmeasured guess. The config names its own unmeasured values where the code reads them, not only in a comment, and this check refuses the session until real quotes have replaced them. The per-contract fees ship at zero, and a zero fee understates the net-of-cost hurdle in the one direction that matters
-3. **Market calendar** — from Alpaca's own calendar, never from a local holiday table
-4. **Daily loss limit** — 3% of equity, then halt and publish
-5. **Buying power** — verified against the account, never assumed
-6. **Cost budget** — cumulative execution cost capped at 2% of equity
+1. **Kill switch**: an append-only file, checked every cycle
+2. **Calibration**: no position is opened while any cost or liquidity input is still an unmeasured guess. The config names its own unmeasured values where the code reads them, not only in a comment, and this check refuses the session until real quotes have replaced them. The per-contract fees ship at zero, and a zero fee understates the net-of-cost hurdle in the one direction that matters
+3. **Market calendar**: from Alpaca's own calendar, never from a local holiday table
+4. **Daily loss limit**: 3% of equity, then halt and publish
+5. **Buying power**: verified against the account, never assumed
+6. **Cost budget**: cumulative execution cost capped at 2% of equity
 
 **Candidate scope**, run on the best candidate of each family:
 
-7. **Max loss computable and within budget** — the agent is structurally incapable of submitting a position whose worst case it cannot compute
-8. **Net-of-cost hurdle** — edge must exceed half-spread × legs + slippage. *The most important check in the system.*
-9. **Leg-count preference** — two legs beat four at comparable net edge, because each leg is another half-spread
-10. **Liquidity** — reject any leg whose relative spread exceeds the measured threshold
-11. **Expected shortfall cap** — projected portfolio ES(1%) within 3% of equity
-12. **Assignment** — no leg that can settle into shares survives the final thirty minutes
-13. **Classifier confidence** — stand down when probabilities cluster at 0.5
-14. **Feature staleness** — never trade off a stale chain
-15. **Concurrency** — at most four open structures
+7. **Max loss computable and within budget**: the agent is structurally incapable of submitting a position whose worst case it cannot compute
+8. **Net-of-cost hurdle**: edge must exceed half-spread × legs + slippage. *The most important check in the system.*
+9. **Leg-count preference**: two legs beat four at comparable net edge, because each leg is another half-spread
+10. **Liquidity**: reject any leg whose relative spread exceeds the measured threshold
+11. **Expected shortfall cap**: projected portfolio ES(1%) within 3% of equity
+12. **Assignment**: no leg that can settle into shares survives the final thirty minutes
+13. **Classifier confidence**: stand down when probabilities cluster at 0.5
+14. **Feature staleness**: never trade off a stale chain
+15. **Concurrency**: at most four open structures
 
 Standing down is a first-class outcome, logged and published with its reasoning. An agent that knows when not to trade is a stronger result than one that always fires.
 
@@ -131,7 +131,7 @@ contracts   = floor(risk_budget / max_loss)
              then checked against the portfolio ES(1%) cap
 ```
 
-One function. No override parameter. Classifier confidence decides *whether* to trade and never *how much* — the research found hard mapping beats confidence-weighted sizing. Size is a function of the tail, not of expected profit: ES(1%) values at 0DTE run roughly 0.58–1.58% of underlying, which makes mean PnL an inadequate summary statistic on its own.
+One function. No override parameter. Classifier confidence decides *whether* to trade and never *how much*. The research found hard mapping beats confidence-weighted sizing. Size is a function of the tail, not of expected profit: ES(1%) values at 0DTE run roughly 0.58–1.58% of underlying, which makes mean PnL an inadequate summary statistic on its own.
 
 ---
 
@@ -152,12 +152,12 @@ cp .env.example .env          # then fill in the paper account's keys
 .venv/bin/python -m scripts.serve            # the dashboard, on :8000
 ```
 
-Deployment artifacts are in `deploy/` — a systemd unit that keeps the dashboard up
+Deployment artifacts are in `deploy/`: a systemd unit that keeps the dashboard up
 across reboots, bound to loopback and published by nginx which terminates TLS. The
 unit runs with `ProtectSystem=strict` and no access to the agent's credentials: the
 dashboard only ever reads the ledger.
 
-The dashboard is server-rendered with no build step and no external requests — the
+The dashboard is server-rendered with no build step and no external requests. The
 charts are inline SVG, because a deployed demo that renders a blank panel when a CDN
 is slow scores as a demo that does not work. Before the agent has run it shows an
 empty page saying so; there is no sample trade and no demo mode.
@@ -184,7 +184,7 @@ It skips cleanly without credentials. With them it measures the real per-leg spr
 checks the strike increment and multiplier against the chain rather than the
 configuration, reads Alpaca's own calendar for the competition window, runs a full
 decision cycle with only the write withheld, and asserts that a candidate really is
-refused because its execution cost consumed its edge — a check that has never been
+refused because its execution cost consumed its edge. A check that has never been
 observed firing has not been demonstrated. Use `-s` to see the measured figures.
 
 ---
@@ -192,8 +192,8 @@ observed firing has not been demonstrated. Use `-s` to see the measured figures.
 ## Honest limitations
 
 - **The research is SPX; this trades SPY.** Every parameter carried across is a hypothesis. Values in `config/convex.yaml` are marked `MEASURED` or `HYPOTHESIS`, and the hypotheses are not to be relied on in a live decision until `scripts/calibrate_costs.py` has replaced them.
-- **The exposure features are proxies.** They are flow/exposure estimates built from traded volume, open interest and leg Greeks — not a dealer-inventory reconstruction. Calling them GEX would overstate what they are.
-- **The classifier may not have enough history.** Training runs on chains the agent *recorded*, never on simulated ones, because an expired contract's book cannot be fetched back — a session that was not recorded can never be labelled honestly. Early on there will be too few sessions to clear the burn-in; `scripts/train.py` says so and fits nothing rather than presenting a model fitted on thirty rows. The agent then runs a documented volatility-regime rule, and every ledger record states which of the two made the call.
+- **The exposure features are proxies.** They are flow/exposure estimates built from traded volume, open interest and leg Greeks, not a dealer-inventory reconstruction. Calling them GEX would overstate what they are.
+- **The classifier may not have enough history.** Training runs on chains the agent *recorded*, never on simulated ones, because an expired contract's book cannot be fetched back, and a session that was not recorded can never be labelled honestly. Early on there will be too few sessions to clear the burn-in; `scripts/train.py` says so and fits nothing rather than presenting a model fitted on thirty rows. The agent then runs a documented volatility-regime rule, and every ledger record states which of the two made the call.
 - **No Sharpe is reported below twenty observations.** A handful of trades with
   similar results produces a ratio in the hundreds; that is a small denominator, not
   an edge, and printing it would be the most misleading number this project could

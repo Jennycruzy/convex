@@ -3,7 +3,7 @@
 The research protocol, run on our own data: an expanding window, predictors
 standardised on the training window alone, and out-of-sample probabilities from
 models that only ever saw sessions strictly earlier than the one they predict.
-Hit rate, Brier score and calibration slope are reported per family — not
+Hit rate, Brier score and calibration slope are reported per family, not
 accuracy on its own, which on an unbalanced label says almost nothing.
 
 This trains on recorded chains, never on simulated ones. That is a hard limit
@@ -117,7 +117,7 @@ def main() -> int:
                 calib = calibration_slope(probabilities, realised)
 
         def show(value):
-            return f"{value:7.3f}" if value is not None else "      —"
+            return f"{value:7.3f}" if value is not None else "      ·"
 
         print(
             f"{str(family):<16} {report.samples:5d} {report.positives:5d} "

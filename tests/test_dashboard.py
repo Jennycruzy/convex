@@ -2,7 +2,7 @@
 
 The dashboard's one job is to be true. Every figure on it is read back out of
 the ledger the agent wrote at decision time, so the tests that matter are the
-ones proving it cannot display anything the agent did not record — in
+ones proving it cannot display anything the agent did not record, in
 particular that an empty ledger produces an empty page and not a demo.
 """
 
@@ -311,10 +311,11 @@ def test_a_replay_over_too_few_sessions_says_so_rather_than_implying_a_result(wi
     assert "too few for a Sharpe ratio to carry meaning" in page
 
 
-def test_a_sharpe_that_could_not_be_computed_renders_as_a_dash(with_backtest):
+def test_a_sharpe_that_could_not_be_computed_renders_as_a_mark_not_a_zero(with_backtest):
+    """An absent figure is marked absent. A zero would be a claim."""
     from convex.dashboard.app import _sharpe
 
-    assert _sharpe(None) == "—"
+    assert _sharpe(None) == "·"
     assert _sharpe(0.77) == "0.77"
 
 
@@ -356,7 +357,7 @@ def test_the_crossing_is_reported_as_the_bracket_the_sweep_resolves():
     """Quoting one interpolated number would claim precision eight points lack."""
     from convex.dashboard.app import _crossing
 
-    assert _crossing(_sweep_points()) == "2.0%-3.0%".replace("-", "–")
+    assert _crossing(_sweep_points()) == "2.0% to 3.0%"
 
 
 def test_a_sweep_that_never_turns_negative_says_so_rather_than_inventing_a_crossing():

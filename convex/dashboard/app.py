@@ -128,7 +128,7 @@ def _tile(key: str, value: str, note: str = "", count: float | None = None,
     )
 
 
-def _number(value: Any, places: int = 2, dash: str = "—") -> str:
+def _number(value: Any, places: int = 2, dash: str = "·") -> str:
     if value is None:
         return dash
     try:
@@ -139,7 +139,7 @@ def _number(value: Any, places: int = 2, dash: str = "—") -> str:
 
 def _sharpe(value) -> str:
     """A Sharpe, or a dash when the sample was too small to support one."""
-    return "—" if value is None else f"{float(value):.2f}"
+    return "·" if value is None else f"{float(value):.2f}"
 
 
 def _backtest_panel(report: dict) -> str:
@@ -156,7 +156,7 @@ def _backtest_panel(report: dict) -> str:
         body.append(
             f"<div class='empty'><p>Replayed over {sessions} session(s). "
             "That is far too few for a Sharpe ratio to carry meaning, so none is shown "
-            "below twenty observations — a handful of similar trades produces a ratio "
+            "below twenty observations. A handful of similar trades produces a ratio "
             "in the hundreds, which is a small denominator rather than an edge.</p></div>"
         )
 
@@ -168,7 +168,7 @@ def _backtest_panel(report: dict) -> str:
     def row(label: str, arm: dict, emphasis: bool = False) -> None:
         survives = arm.get("net_sharpe")
         verdict = (
-            "<span class='tag stand'>—</span>" if survives is None
+            "<span class='badge stood'>·</span>" if survives is None
             else ("<span class='tag open'>yes</span>" if survives > 0
                   else "<span class='tag refused'>no</span>")
         )
@@ -211,9 +211,9 @@ def _cycle_panel(cycle) -> str:
     body.append("</tr></thead><tbody>")
     for record in verdicts:
         body.append(
-            f"<tr><td>{escape(str(record.get('structure') or '—'))}</td>"
+            f"<tr><td>{escape(str(record.get('structure') or '·'))}</td>"
             f"<td class='num'>{_number(record.get('probability'), 3)}</td>"
-            f"<td>{escape(str(record.get('probability_source') or '—'))}</td>"
+            f"<td>{escape(str(record.get('probability_source') or '·'))}</td>"
             f"<td>{_tag(str(record.get('action', '')))}</td>"
             f"<td class='num'>{_number(record.get('contracts'), 0)}</td>"
             f"<td>{escape(str(record.get('reject_reason') or ''))}</td></tr>"
@@ -292,7 +292,7 @@ def create_app(config: Config | None = None) -> FastAPI:
                 "<h3>NO DECISIONS RECORDED YET</h3>"
                 "<p>The agent has not completed a cycle against the paper "
                 "account, so there is nothing to show. This page deliberately renders "
-                "no sample trade and no demo data — a dashboard displaying numbers the "
+                "no sample trade and no demo data. A dashboard displaying numbers the "
                 "agent never produced would be the exact thing this project argues "
                 "against.</p>"
                 "<p class='faint'>It fills in after "
@@ -413,7 +413,7 @@ def _page(body: str) -> str:
         "<meta charset='utf-8'>"
         "<meta name='viewport' content='width=device-width,initial-scale=1'>"
         "<meta name='color-scheme' content='dark light'>"
-        "<title>CONVEX — 0DTE SPY, priced net of cost</title>"
+        "<title>CONVEX · 0DTE SPY, priced net of cost</title>"
         "<meta name='description' content='A cost-aware, tail-budgeted 0DTE SPY "
         "options agent. Every decision, including every refusal, with the "
         "arithmetic that produced it.'>"
@@ -438,7 +438,7 @@ def _masthead(summary, live: bool) -> str:
     A terminal tells you the state of the world before it tells you anything
     else, so this is the first row on the page and it stays there while you
     scroll: what this is, whether the ledger is live, what it has done, and the
-    exchange clock — which is the only thing on the page that moves without a
+    exchange clock, which is the only thing on the page that moves without a
     reload, and is there because a terminal that does not tick looks frozen.
     """
     led = "led live" if live else "led off"
@@ -519,7 +519,7 @@ def _hero(summary, sensitivity: dict) -> str:
         "<p class='lede' style='margin-top:16px'>The obvious 0DTE structures were "
         "tested over ten years. Before costs they look like a strategy. After "
         "costs the best-known one has a <strong class='down'>negative</strong> "
-        "Sharpe. The payoff shape was never the problem — four legs of bid-ask "
+        "Sharpe. The payoff shape was never the problem. Four legs of bid-ask "
         "were.</p>",
         "<p>CONVEX reruns that test on SPY, over sessions rebuilt from the option "
         "tape, and ranks every candidate on edge <em>after</em> the spread it "
@@ -568,7 +568,7 @@ def _hero(summary, sensitivity: dict) -> str:
             + "<p class='note' style='margin-top:16px'><strong>Read this before "
             "quoting it.</strong> These sessions were rebuilt from trade prints, "
             "not recorded from the live book, and the spread is modelled rather "
-            "than measured — the book for those sessions is gone. Every point is "
+            "than measured. The book for those sessions is gone. Every point is "
             "a full replay; nothing between them is drawn. Which side of the "
             "crossing SPY actually trades on is a measurement, taken at the open, "
             "not an argument had here.</p>"
@@ -598,7 +598,7 @@ def _crossing(points: list) -> str:
         return ""
     if first_negative is None:
         return f"beyond {last_positive:.1%}"
-    return f"{last_positive:.1%}–{first_negative:.1%}"
+    return f"{last_positive:.1%} to {first_negative:.1%}"
 
 
 def _decision_log(rows: list[dict[str, Any]], limit: int = 500) -> str:
@@ -621,7 +621,7 @@ def _decision_log(rows: list[dict[str, Any]], limit: int = 500) -> str:
             "receipts",
             "EVERY DECISION, INCLUDING EVERY REFUSAL",
             "Written to an append-only ledger before the order existed. Nothing "
-            "here is computed for display — it is read back out of what the agent "
+            "here is computed for display. It is read back out of what the agent "
             "recorded at the moment it decided, refusals included.",
         ),
         "<div class='panel reveal' style='margin-top:18px'>",
@@ -665,7 +665,7 @@ def _decision_log(rows: list[dict[str, Any]], limit: int = 500) -> str:
             f"<span class='seq'>{number:04d}</span>"
             f"<span class='at'>{escape(stamp[11:19] or '--:--:--')}</span>"
             f"{_tag(str(record.get('action', '')))}"
-            f"<span class='what'>{escape(str(record.get('structure') or reason or '—'))}</span>"
+            f"<span class='what'>{escape(str(record.get('structure') or reason or '·'))}</span>"
             f"<span class='fig'><span class='k'>p </span>"
             f"{_number(record.get('probability'), 3, '·')}</span>"
             f"<span class='fig'><span class='k'>net </span>"

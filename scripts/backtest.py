@@ -64,7 +64,7 @@ def out_of_sample_probabilities(samples, config, names_for=None) -> dict:
 
 
 def show(value, places: int = 3, width: int = 8) -> str:
-    return f"{value:{width}.{places}f}" if value is not None else " " * (width - 1) + "—"
+    return f"{value:{width}.{places}f}" if value is not None else " " * (width - 1) + "·"
 
 
 def main() -> int:

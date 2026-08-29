@@ -1,7 +1,7 @@
 """Replay the rebuilt sessions at a range of spreads and find where net edge dies.
 
-The strategy's whole question is not whether it makes money gross — it does —
-but whether it survives what it costs to trade. That answer is a function of
+The strategy's whole question is not whether it makes money gross, which it
+does, but whether it survives what it costs to trade. That answer is a function of
 one number, the spread paid per leg, so this measures the answer across a range
 of that number instead of asserting it at one.
 

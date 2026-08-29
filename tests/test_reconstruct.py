@@ -1,7 +1,7 @@
 """Rebuilding a past session, and refusing to invent the parts that are gone.
 
-The arithmetic here is checked against itself — a price produced by the pricer
-must solve back to the volatility that produced it — and the refusals are
+The arithmetic here is checked against itself, in that a price produced by the
+pricer must solve back to the volatility that produced it, and the refusals are
 checked explicitly, because the failure mode that matters is not a wrong number
 but a confident one where there should be none.
 """

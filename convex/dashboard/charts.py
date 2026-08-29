@@ -202,7 +202,7 @@ def sensitivity_svg(points: Sequence[dict], width: int = 940, height: int = 380)
     """Net and gross Sharpe of the basket against the spread paid per leg.
 
     The one chart that answers the question the project is actually asking. The
-    gross series is drawn flat and pale because it barely moves — the strategy's
+    gross series is drawn flat and pale because it barely moves. The strategy's
     raw signal is not what is in doubt. The net series falls through zero, and
     the band where it crosses is shaded, because that crossing is the whole
     result: below it the strategy survives what it costs to trade, above it it
@@ -325,7 +325,7 @@ def sensitivity_svg(points: Sequence[dict], width: int = 940, height: int = 380)
         out.append(
             f"<g><circle class='pt' cx='{x:.1f}' cy='{y:.1f}' r='4.5' fill='{colour}' "
             f"stroke='var(--panel)' stroke-width='2'>"
-            f"<title>{point['relative_spread'] * 100:g}% spread — net Sharpe "
+            f"<title>{point['relative_spread'] * 100:g}% spread · net Sharpe "
             f"{net:+.2f}, gross {point['classified']['gross_sharpe']:+.2f}, "
             f"{point['classified']['trades']} trades</title></circle></g>"
         )

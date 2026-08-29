@@ -41,7 +41,7 @@ TRADING_DAYS_PER_YEAR = 252
 
 # Below this many observations an annualised Sharpe is arithmetic on noise. A
 # handful of trades with similar results produces a ratio in the hundreds,
-# which is not a good result — it is a small denominator. Refusing to print one
+# which is not a good result. It is a small denominator. Refusing to print one
 # is the honest behaviour, and over a four-session competition window it means
 # no Sharpe is reported at all, which is correct.
 MINIMUM_OBSERVATIONS_FOR_SHARPE = 20

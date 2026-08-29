@@ -11,7 +11,7 @@ So this module rebuilds sessions that were never recorded, and is careful to be
 honest about what a rebuilt session is and is not.
 
 **What Alpaca will return for a past session.** Trade bars for an expired
-contract, if the OCC symbol is constructed rather than looked up — the contract
+contract, if the OCC symbol is constructed rather than looked up. The contract
 listing drops expired contracts, but the bars endpoint still answers. Minute
 bars for the underlying. That is all.
 
@@ -20,8 +20,8 @@ endpoint, only a latest-quote one, so the bid, the ask, the sizes and the
 open interest of a past 10:00 are gone. Three things follow and each is a real
 limit on what a model built from this can claim:
 
-  1. The liquidity features — half-spread, depth, relative spread, tightness —
-     cannot be rebuilt. They are absent from a reconstructed row, not zeroed.
+  1. The liquidity features, being half-spread, depth, relative spread and
+     tightness, cannot be rebuilt. They are absent from a reconstructed row, not zeroed.
   2. The open-interest exposure proxies cannot be rebuilt either, for the same
      reason, and are absent rather than guessed.
   3. Implied volatility is solved from a *print*, not from a mid. A print is
@@ -93,7 +93,7 @@ def black_scholes(
 
     SPY options are American, but early exercise on the last few hours of a
     contract's life is worth essentially nothing above intrinsic, and this is
-    never used to price a trade — only to read a volatility out of a print.
+    never used to price a trade, only to read a volatility out of a print.
     """
     if years <= 0.0 or vol <= 0.0:
         return max(0.0, (spot - strike) if right is Right.CALL else (strike - spot))
@@ -208,7 +208,7 @@ def arbitrage_free(
     strike's print happened at its own moment inside the entry minute, at its
     own side of its own spread, and stitching them into a column produces a
     surface that is merely close to a real one. Priced naively, the gaps show
-    up as structures that appear to profit at every expiry price — which the
+    up as structures that appear to profit at every expiry price, which the
     sizing code correctly refuses to size, because that is what an arbitrage
     looks like and it is not one.
 
@@ -289,7 +289,7 @@ def integrated_variance(
 
     The live engine integrates the mid of each out-of-the-money option. There
     is no mid to integrate here, so the print stands in for it. That is a real
-    substitution and not a neutral one — a print sits somewhere inside the
+    substitution and not a neutral one. A print sits somewhere inside the
     spread rather than at its centre, so this is noisier than the live figure
     and can be biased on a strike that only traded once. It is recorded as a
     reconstructed feature for exactly that reason.
@@ -386,7 +386,7 @@ def as_chain_entries(
     """Dress a rebuilt session as a chain, with the spread modelled explicitly.
 
     The candidate builders, the cost model and the edge calculation read quotes
-    and nothing else — no Greeks, no open interest — so a rebuilt session can be
+    and nothing else, with no Greeks and no open interest, so a rebuilt session can be
     run through the *same* ranking the live cycle uses rather than a parallel
     one written for the backtest. That matters: a label attached to a candidate
     some other ranking chose is a label for a decision nobody makes.

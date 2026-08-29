@@ -3,7 +3,7 @@
 Law 9: a risk check that has never been observed rejecting something does not
 exist. These build real candidates from the real chain, price them net of the
 real spread, and assert that the checks reach the verdicts they are supposed to
-reach — including the one the whole project turns on, a candidate refused
+reach, including the one the whole project turns on, a candidate refused
 because its own execution cost consumed its edge.
 
 Nothing here submits an order. The execution path is exercised through the same
@@ -93,7 +93,7 @@ def test_a_candidate_is_refused_because_cost_ate_its_edge(priced, config, spot, 
     """The check the whole project turns on, observed rejecting something.
 
     If no candidate on the live book fails this, the test says so rather than
-    passing quietly — a check that never fires has not been demonstrated, and
+    passing quietly. A check that never fires has not been demonstrated, and
     the write-up would be claiming something unobserved.
     """
     from convex.gates import NetOfCostGate

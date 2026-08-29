@@ -14,8 +14,8 @@ strings become floats, where a missing field becomes an exception, and where
 Law 3 is enforced at the boundary. A quote that cannot be parsed does not
 become a zero here; it raises, and the cycle that wanted it stops.
 
-The gateway hands back the same objects it always did — ChainEntry, Quote,
-Greeks, AccountSnapshot — so the decision code neither knows nor cares which
+The gateway hands back the same objects it always did, ChainEntry and Quote
+and Greeks and AccountSnapshot, so the decision code neither knows nor cares which
 transport it is on.
 """
 

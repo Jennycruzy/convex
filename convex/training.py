@@ -165,7 +165,7 @@ def build_samples(
 
     # The realised-moment features need sessions before the one being labelled.
     # They come from the scenario set's own history, sliced to the days that
-    # actually preceded each session — the whole set would include days after
+    # actually preceded each session. The whole set would include days after
     # it, which is look-ahead wearing the costume of a longer sample.
     scenario_returns = list(zip(scenarios.source_days, scenarios.log_returns.tolist()))
     realised_after: list[tuple[date, float]] = []

@@ -211,7 +211,7 @@ def test_recorded_chains_become_fitted_models_the_agent_can_use(tmp_path):
     This is the loop the project depends on: the agent records what it saw, the
     trainer learns from the recordings, and the next cycle loads the result. If
     any link is broken the agent silently runs the fallback rule forever, which
-    would still trade — just never with a model, while claiming it might.
+    would still trade, just never with a model, while claiming it might.
     """
     from convex.classifier import fit_family, load_models, save_models, walk_forward
 

@@ -214,7 +214,7 @@ def find_decision(records: Iterable[dict[str, Any]], sequence: int) -> dict[str,
 def format_stamp(value: str | None) -> str:
     """A ledger timestamp as a reader wants it, or a dash if there is none."""
     if not value:
-        return "—"
+        return "·"
     try:
         return datetime.fromisoformat(value).strftime("%Y-%m-%d %H:%M:%S %Z").strip()
     except ValueError:

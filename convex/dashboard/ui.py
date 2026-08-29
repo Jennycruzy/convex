@@ -3,8 +3,8 @@
 This is a trading terminal, and it is built like one rather than like a web
 page with financial data on it. Four decisions carry the whole thing.
 
-**It is set in monospace, all of it.** Not the numbers only — the labels, the
-headings, the prose. A terminal reads in one width because every character
+**It is set in monospace, all of it.** Not the numbers only, but the labels,
+the headings and the prose. A terminal reads in one width because every character
 occupying the same cell is what lets a column of figures be scanned rather than
 read, and because the moment a proportional face appears next to a fixed one
 the whole surface stops looking like an instrument and starts looking like a
@@ -17,7 +17,7 @@ shadows and corner radii would do elsewhere, and they cost nothing to paint.
 **The palette is semantic before it is decorative.** Green is a gain and red is
 a loss and nothing else is allowed to use them. Amber belongs to execution
 cost, because cost is the antagonist of this entire project and it should be
-the same colour every time it appears — in the waterfall, in a table, in a
+the same colour every time it appears: in the waterfall, in a table, in a
 refusal. That leaves cyan for the interface itself: keys, rules, the things you
 can click. Four colours, each meaning exactly one thing.
 
@@ -25,8 +25,8 @@ can click. Four colours, each meaning exactly one thing.
 state at once. Rows are tight, padding is small, the type is small, and the
 information is allowed to be close together.
 
-The light theme is a paper terminal — warm ground, dark ink, the same grid —
-rather than the dark theme with the colours flipped.
+The light theme is a paper terminal, warm ground and dark ink on the same
+grid, rather than the dark theme with the colours flipped.
 """
 
 from __future__ import annotations
@@ -60,7 +60,7 @@ TOKENS = """
   --key-hot:  #ffd166;
 
   /* Phosphor green for a gain and a hot red for a loss, and nothing else may
-     use either — the two colours a trader reads before any text. */
+     use either. They are the two colours a trader reads before any text. */
   --up:       #00e08a;
   --down:     #ff4d5a;
 
@@ -353,9 +353,9 @@ button.theme-toggle:focus-visible { outline: 1px solid var(--key); outline-offse
 
 /* --------------------------------------------------------------------- log */
 
-/* The decision log. It is written the way a log is written — oldest at the
-   top, newest at the bottom, days marked as they turn — and it scrolls inside
-   its own frame rather than growing the page. That is the whole point: another
+/* The decision log. It is written the way a log is written: oldest at the
+   top, newest at the bottom, days marked as they turn. It scrolls inside its
+   own frame rather than growing the page. That is the whole point: another
    session appends to the bottom and the panel above it does not move, so a
    week of trading is a scroll rather than a redesign. */
 .log {

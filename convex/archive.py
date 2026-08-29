@@ -2,8 +2,8 @@
 
 Nothing in this project trains on simulated data, and the one exception the
 rules allow is training on *recorded* real chains. This is the recorder. Every
-cycle writes the 10:00 snapshot it actually saw — every contract, its quote,
-its Greeks, its open interest — to a dated file, and training reads those files
+cycle writes the 10:00 snapshot it actually saw, with every contract, its
+quote, its Greeks and its open interest, to a dated file, and training reads those files
 back rather than re-fetching a chain that no longer exists.
 
 That is not a convenience. Historical option quotes for a past 10:00 are not

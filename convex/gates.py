@@ -1,4 +1,4 @@
-"""The twelve risk gates.
+"""The fifteen risk gates.
 
 Every gate is an object with a name, a scope and a verdict, so the whole set
 can be listed on the dashboard and in the write-up whether or not it fired
@@ -186,7 +186,7 @@ class CalibrationGate:
                 False,
                 "never measured against live quotes: "
                 + ", ".join(unmeasured)
-                + " — run scripts/calibrate_costs.py while the market is open",
+                + ". Run scripts/calibrate_costs.py while the market is open",
             )
         return GateResult(
             self.name,
