@@ -64,6 +64,35 @@ def _unwrap(payload: Any) -> Any:
     return payload
 
 
+SECURITY_KEY = "_alpaca_mcp_security"
+
+
+def _strip_security_envelope(payload: Any, tool: str) -> Any:
+    """Return the body of the server's provenance envelope.
+
+    The Alpaca server does not answer with the account, the chain or the order
+    directly. It answers with
+
+        {"_alpaca_mcp_security": {...}, "data": {...}}
+
+    where the marker declares the result untrusted tool output and asks that it
+    be read as data rather than obeyed as instructions. That is exactly how this
+    program treats it: nothing downstream interprets a field as an instruction,
+    and the language model is handed figures that deterministic code has already
+    computed. So the marker is stripped here and the body returned.
+
+    An envelope without a body is not a shape to guess at, so it raises.
+    """
+    if not isinstance(payload, dict) or SECURITY_KEY not in payload:
+        return payload
+    if "data" not in payload:
+        raise DataError(
+            f"{tool} returned a {SECURITY_KEY} envelope with no 'data' body "
+            f"(keys: {sorted(payload)})"
+        )
+    return payload["data"]
+
+
 class McpClient:
     """One live connection to the Alpaca MCP server."""
 
@@ -211,6 +240,12 @@ class McpClient:
                 payload = _unwrap(json.loads(text))
             except json.JSONDecodeError as error:
                 raise DataError(f"{tool} returned something that is not JSON: {text[:200]}") from error
+
+        # Strip the provenance envelope before anything reads the payload, so
+        # that the error check below inspects the body rather than the marker.
+        # The FastMCP ``{"result": ...}`` wrapper sits inside that body, not
+        # outside it, so a list-returning tool needs unwrapping a second time.
+        payload = _unwrap(_strip_security_envelope(payload, tool))
 
         # The order tools answer with a successful result whose body carries an
         # error object. Reading that as a fill is the worst failure available
