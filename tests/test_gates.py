@@ -200,10 +200,23 @@ def test_daily_loss_limit_stops_the_session(measured, tmp_path):
     assert {f.name for f in report.failures} == {"daily_loss_limit"}
 
 
-def test_closed_day_and_submission_cutoff_both_stop_the_session(config, tmp_path):
-    assert not run_session_gates(context(config, tmp_path, is_trading_day=False)).passed
-    late = context(config, tmp_path, submission_cutoff=NOW - timedelta(minutes=1))
-    assert not run_session_gates(late).passed
+def test_closed_day_and_submission_cutoff_both_stop_the_session(measured, tmp_path):
+    """Named, not merely failed.
+
+    This ran against the unmeasured config, so the calibration check failed
+    first and the assertion was satisfied whatever the calendar gate did. The
+    gate is now the one asked, and it has to be the one that answers.
+    """
+    closed = run_session_gates(context(measured, tmp_path, is_trading_day=False))
+    assert not closed.passed
+    assert closed.first_failure.name == "market_calendar"
+
+    late = run_session_gates(
+        context(measured, tmp_path, submission_cutoff=NOW - timedelta(minutes=1))
+    )
+    assert not late.passed
+    assert late.first_failure.name == "market_calendar"
+    assert "cutoff" in late.first_failure.detail
 
 
 def test_cost_budget_stops_the_session(measured, tmp_path):
@@ -332,3 +345,54 @@ def test_the_session_stands_down_while_a_cost_input_is_still_unmeasured(
 def test_the_session_proceeds_once_every_input_has_been_measured(measured, tmp_path):
     report = run_session_gates(context(measured, tmp_path))
     assert report.passed, [f.detail for f in report.failures]
+
+
+def test_a_structure_risking_more_than_its_budget_is_refused(
+    test_chain, config, scenarios, tmp_path
+):
+    """The max-loss gate, observed refusing rather than assumed present.
+
+    Law 9: a gate that has never been seen rejecting anything has not been
+    demonstrated. This one had tests around it and none of them made it fire.
+    """
+    from convex.gates import MaxLossGate
+
+    index = chain_index(test_chain)
+    spot = 650.0
+    candidate = put_broken_wing_butterflies(index, config, spot)[0]
+    estimate = evaluate(
+        candidate.legs, scenarios, CostModel.from_config(config), spot, 1,
+        config.float_("risk.es_confidence"),
+    )
+    # An account small enough that one per-structure budget cannot carry the
+    # worst case this structure already computes.
+    tiny = context(config, tmp_path, equity=estimate.profile.max_loss * 10.0)
+    verdict = MaxLossGate().check(tiny, candidate, estimate, None)
+    assert not verdict.passed
+    assert verdict.observed == estimate.profile.max_loss
+    assert verdict.observed > verdict.threshold
+
+
+def test_the_leg_count_preference_reports_but_never_blocks(
+    test_chain, config, scenarios, tmp_path
+):
+    """It is a tie-break, not a veto, and the distinction is load-bearing.
+
+    A four-legged structure has to be allowed through on its own merits; the
+    preference only decides races at comparable net edge.
+    """
+    from convex.gates import LegCountPreference
+
+    index = chain_index(test_chain)
+    spot = 650.0
+    candidate = put_broken_wing_butterflies(index, config, spot)[0]
+    estimate = evaluate(
+        candidate.legs, scenarios, CostModel.from_config(config), spot, 1,
+        config.float_("risk.es_confidence"),
+    )
+    verdict = LegCountPreference().check(
+        context(config, tmp_path), candidate, estimate, None
+    )
+    assert verdict.blocking is False
+    assert verdict.passed
+    assert verdict.observed == float(estimate.cost.leg_count)

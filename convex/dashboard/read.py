@@ -103,9 +103,23 @@ def summarise(records: Iterable[dict[str, Any]]) -> Summary:
             realised += float(outcome["realised_pnl"])
             settled += 1
         if action == Action.ORDER_SUBMITTED.value:
-            breakdown = row.get("cost_breakdown") or {}
-            contracts = int(row.get("contracts") or 0)
-            cost += float(breakdown.get("total", 0.0)) * max(contracts, 1)
+            breakdown = row.get("cost_breakdown")
+            # Law 3. A submitted order without its cost breakdown or its lot
+            # count is a ledger this page cannot total honestly, and the old
+            # reading of it assumed one lot, which invented the number rather
+            # than reporting that it was missing.
+            if breakdown is None or row.get("contracts") is None:
+                raise ValueError(
+                    f"ledger row {row.get('seq')} submitted an order without "
+                    "a cost breakdown and a contract count; the page cannot "
+                    "total execution cost from it"
+                )
+            if "total" not in breakdown:
+                raise ValueError(
+                    f"ledger row {row.get('seq')} has a cost breakdown with no "
+                    f"'total' (keys: {sorted(breakdown)})"
+                )
+            cost += float(breakdown["total"]) * int(row["contracts"])
 
     stamps = [row["ts"] for row in rows if row.get("ts")]
     decisions = sum(counts[action] for action in DECISION_ACTIONS)

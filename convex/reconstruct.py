@@ -468,6 +468,19 @@ def strike_ladder(spot: float, config: Config) -> list[float]:
     return [float(strike) for strike in range(first, last + 1)]
 
 
+def _count(bar: dict, key: str, symbol: str) -> int:
+    """A bar's trade count or volume, required rather than defaulted.
+
+    Law 3. These arrive on every bar Alpaca returns, so an absent one means the
+    shape changed underneath this code, and a zero there would read as a
+    contract that printed without trading.
+    """
+    value = bar.get(key)
+    if value is None:
+        raise DataError(f"{symbol}: minute bar has no {key!r} (keys: {sorted(bar)})")
+    return int(value)
+
+
 def _bar_price(bar: dict) -> float | None:
     """The volume-weighted price of the entry minute, falling back to its close."""
     for key in ("vw", "c"):
@@ -529,8 +542,8 @@ def build(
                     implied_volatility=implied_volatility(
                         price, spot_at_entry, contract.strike, contract.right, years, rate
                     ),
-                    trades=int(bar.get("n") or 0),
-                    volume=int(bar.get("v") or 0),
+                    trades=_count(bar, "n", symbol),
+                    volume=_count(bar, "v", symbol),
                 )
             )
             break

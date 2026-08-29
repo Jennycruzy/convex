@@ -196,6 +196,7 @@ def opened_bwb():
         rationale="Entering 2 lots.",
         probability=0.64,
         contracts=2,
+        cost_breakdown={"total": 8.40, "half_spread": 6.0, "slippage": 2.4},
         net_price=-0.20,
         max_loss=960.0,
         es_contribution=620.0,
@@ -331,6 +332,7 @@ def test_the_last_cycle_names_which_of_the_two_decided_each_family(client):
                extra={"probability_source": "regime rule (high_variance)"}),
         Record(action=Action.ORDER_SUBMITTED, cycle_id="c7", structure="put_bwb",
                rationale="Entering.", probability=0.64, contracts=2,
+               cost_breakdown={"total": 8.40},
                extra={"probability_source": "classifier"}),
     )
     page = session.get("/").text
@@ -476,7 +478,8 @@ def test_the_log_reads_the_way_a_log_is_written(client):
         Record(action=Action.CANDIDATE_REJECTED, cycle_id="c1", structure="put_bwb",
                reject_reason="net_of_cost", rationale="Cost ate it."),
         Record(action=Action.ORDER_SUBMITTED, cycle_id="c2", structure="call_bwb",
-               rationale="Opened.", contracts=2),
+               rationale="Opened.", contracts=2,
+               cost_breakdown={"total": 8.40}),
     )
     page = session.get("/").text
     assert "decision log" in page.lower()
