@@ -85,3 +85,45 @@ def test_the_ladder_covers_the_configured_band_in_whole_dollars():
     assert ladder == sorted(ladder)
     # A 2% band on a 769 underlying is roughly thirty-one dollars wide.
     assert 25 <= len(ladder) <= 40
+
+
+# ------------------------------------------------------------ tape features
+
+
+def test_a_contract_with_no_daily_bar_has_not_traded_rather_than_no_data():
+    """The one place absence really is an observation, written down once."""
+    from convex.features import traded_volume
+
+    assert traded_volume(None) == 0.0
+    assert traded_volume(0) == 0.0
+    assert traded_volume(412) == 412.0
+
+
+def test_the_tape_reports_flow_the_book_cannot_be_asked_for():
+    from convex.features import tape_features
+
+    rows = [(Right.PUT, 300), (Right.PUT, 100), (Right.CALL, 100), (Right.CALL, None)]
+    tape = tape_features(rows)
+    assert tape["tape_put_share"] == pytest.approx(0.8)
+    assert tape["tape_breadth"] == pytest.approx(0.75)
+    # Herfindahl: 0.6^2 + 0.2^2 + 0.2^2
+    assert tape["tape_concentration"] == pytest.approx(0.44)
+
+
+def test_a_chain_that_did_not_trade_asserts_no_imbalance_rather_than_inventing_one():
+    from convex.features import tape_features
+
+    tape = tape_features([(Right.PUT, 0), (Right.CALL, None)])
+    assert tape["tape_put_share"] == 0.5
+    assert tape["tape_volume"] == 0.0
+    assert tape["tape_breadth"] == 0.0
+
+
+def test_the_tape_features_are_computable_from_both_sides_of_the_seam():
+    """A feature meaning one thing in training and another at 10:00 is worse
+    than no feature, so the two paths must produce the same names."""
+    from convex.features import tape_features
+    from convex.reconstruct import RECONSTRUCTED_FEATURES
+
+    produced = set(tape_features([(Right.PUT, 5)]))
+    assert produced <= set(RECONSTRUCTED_FEATURES)

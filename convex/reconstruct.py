@@ -55,6 +55,7 @@ from convex.features import (
     _strike_widths,
     lagged_results,
     realised_moments,
+    tape_features,
     time_to_close_years,
 )
 from convex.archive import ChainSnapshot
@@ -332,6 +333,10 @@ RECONSTRUCTED_FEATURES: tuple[str, ...] = (
     "implied_skew",
     "slope_up",
     "slope_dn",
+    "tape_volume",
+    "tape_breadth",
+    "tape_concentration",
+    "tape_put_share",
     "realised_variance",
     "realised_skew",
     "realised_return",
@@ -365,6 +370,9 @@ def features(
         "slope_up": smile_slope(calls, session.spot_at_entry),
         "slope_dn": smile_slope(puts, session.spot_at_entry),
     }
+    values.update(
+        tape_features([(e.contract.right, e.volume) for e in session.entries])
+    )
     values.update(realised_moments(prior_returns))
     for family, history in sorted(family_pnl.items()):
         for name, value in lagged_results(history).items():
@@ -468,6 +476,14 @@ def strike_ladder(spot: float, config: Config) -> list[float]:
     return [float(strike) for strike in range(first, last + 1)]
 
 
+def _stamp_of(bar: dict, symbol: str) -> datetime:
+    """A bar's timestamp, required rather than assumed."""
+    value = bar.get("t")
+    if value is None:
+        raise DataError(f"{symbol}: minute bar has no 't' (keys: {sorted(bar)})")
+    return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+
+
 def _count(bar: dict, key: str, symbol: str) -> int:
     """A bar's trade count or volume, required rather than defaulted.
 
@@ -498,6 +514,7 @@ def build(
     close_at: datetime,
     spot_at_entry: float,
     spot_at_close: float,
+    open_at: datetime | None = None,
 ) -> ReconstructedSession:
     """Rebuild one session's chain at the entry minute.
 
@@ -522,31 +539,41 @@ def build(
                 multiplier=config.int_("underlying.contract_multiplier"),
             )
 
-    # One minute of tape at the entry. A contract that did not trade in that
-    # minute has no entry price and is left out rather than filled in.
+    # From the opening bell to the entry, not the entry minute alone. The price
+    # comes from the entry minute, but the volume has to be session-to-date,
+    # because that is what the live snapshot reports and a feature that means
+    # one thing in training and another at 10:00 is worse than no feature.
+    started = open_at or entry_at - timedelta(minutes=30)
     bars = gateway.option_bars(
-        list(contracts), entry_at, entry_at + timedelta(minutes=1)
+        list(contracts), started, entry_at + timedelta(minutes=1)
     )
     years = max((close_at - entry_at).total_seconds(), 0.0) / (365.0 * 24.0 * 3600.0)
 
     entries: list[ReconstructedEntry] = []
     for symbol, contract in contracts.items():
-        for bar in bars.get(symbol) or []:
-            price = _bar_price(bar)
-            if price is None:
-                continue
-            entries.append(
-                ReconstructedEntry(
-                    contract=contract,
-                    entry_price=price,
-                    implied_volatility=implied_volatility(
-                        price, spot_at_entry, contract.strike, contract.right, years, rate
-                    ),
-                    trades=_count(bar, "n", symbol),
-                    volume=_count(bar, "v", symbol),
-                )
+        session_bars = bars.get(symbol) or []
+        if not session_bars:
+            continue
+        # Everything that printed at or before the entry, so the volume is the
+        # session's and the price is the entry minute's.
+        upto = [b for b in session_bars if _stamp_of(b, symbol) <= entry_at]
+        if not upto:
+            continue
+        last = upto[-1]
+        price = _bar_price(last)
+        if price is None:
+            continue
+        entries.append(
+            ReconstructedEntry(
+                contract=contract,
+                entry_price=price,
+                implied_volatility=implied_volatility(
+                    price, spot_at_entry, contract.strike, contract.right, years, rate
+                ),
+                trades=sum(_count(b, "n", symbol) for b in upto),
+                volume=sum(_count(b, "v", symbol) for b in upto),
             )
-            break
+        )
 
     # Prints from different moments do not form an arbitrage-free surface on
     # their own, and one that is not arbitrage-free cannot be priced.
@@ -651,7 +678,8 @@ def rebuild_window(
         spot_at_close = float(before_close.iloc[-1]["close"])
 
         session_data = build(
-            gateway, config, day, entry_at, close_at, spot_at_entry, spot_at_close
+            gateway, config, day, entry_at, close_at, spot_at_entry, spot_at_close,
+            open_at=session.open_at,
         )
         coverages.append(session_data.coverage)
         if on_session is not None:

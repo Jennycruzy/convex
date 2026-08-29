@@ -1,6 +1,6 @@
 # CONVEX · one-page write-up
 
-**Alpaca account ID:** _(inserted at submission; without it P&L cannot be scored)_
+**Alpaca account ID:** `PA35QSFNW15J` (paper, opened 2026-08-28 at exactly $100,000.00, options level 3)
 **Repo:** github.com/Jennycruzy/convex · **Demo:** https://convex.isobars.xyz
 **Instrument:** SPY 0DTE options, paper account, entry 10:00 ET, held to the 16:00 close.
 

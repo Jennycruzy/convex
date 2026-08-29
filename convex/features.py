@@ -154,6 +154,63 @@ def liquidity_features(rows: Sequence[ChainEntry]) -> dict[str, float]:
     }
 
 
+def traded_volume(value: int | None) -> float:
+    """A contract's session volume, reading absence as zero rather than defaulting.
+
+    Law 3 forbids a missing field becoming a zero, and this is the one place the
+    distinction genuinely collapses: Alpaca omits the daily bar for a contract
+    that has not traded today, so the absence *is* the observation that nothing
+    printed. That is a reading of the feed's shape, not a fallback, and it is
+    written here once so nothing downstream has to decide it again.
+    """
+    return 0.0 if value is None else float(value)
+
+
+def tape_features(rows: Sequence[tuple[Right, int | None]]) -> dict[str, float]:
+    """Liquidity and flow read off the tape instead of off the book.
+
+    The book is what the cost model wants and it is exactly what a rebuilt
+    session cannot have, since Alpaca keeps no historical option quotes. What it
+    does keep is what traded. These four are computable identically from a live
+    snapshot and from the tape of a session that ended a year ago, which is the
+    property that makes them usable: a model fitted on history can be run at
+    10:00 without the features shifting meaning underneath it.
+
+      tape_volume         how much traded across the chain, logged because the
+                          raw figure spans orders of magnitude between a quiet
+                          Tuesday and an expiry with news in it
+      tape_breadth        the share of the chain that traded at all, which is
+                          the closest honest proxy for how far a structure can
+                          reach for strikes before it runs out of liquidity
+      tape_concentration  a Herfindahl over volume share. One busy strike and a
+                          dead ladder is a different market from an evenly
+                          traded one, and the two have very different execution
+                          costs at the wings
+      tape_put_share      puts as a share of traded volume. This is the flow
+                          counterpart to implied skew, and the research is that
+                          skew drives 0DTE results, so a directional imbalance
+                          on the tape belongs in the row beside it
+    """
+    if not rows:
+        raise DataError("tape features need a non-empty chain snapshot")
+    volumes = [traded_volume(volume) for _, volume in rows]
+    total = sum(volumes)
+    traded = sum(1 for volume in volumes if volume > 0.0)
+    put_volume = sum(
+        volume for (right, _), volume in zip(rows, volumes) if right is Right.PUT
+    )
+    shares = [volume / total for volume in volumes] if total > 0.0 else []
+    return {
+        "tape_volume": float(np.log1p(total)),
+        "tape_breadth": traded / len(rows),
+        "tape_concentration": float(sum(share * share for share in shares)),
+        # With nothing traded there is no imbalance to report, and a half is the
+        # only value that asserts none. It is reached from an observed total of
+        # zero rather than from a missing field.
+        "tape_put_share": (put_volume / total) if total > 0.0 else 0.5,
+    }
+
+
 def realised_moments(log_returns: Sequence[float]) -> dict[str, float]:
     """Lagged realised variance, skewness and return from prior sessions."""
     series = np.asarray(list(log_returns), dtype=float)
@@ -224,6 +281,9 @@ def build(
         "gex_balance": gamma_balance,
     }
     values.update(liquidity_features(chain))
+    values.update(
+        tape_features([(row.contract.right, row.volume) for row in chain])
+    )
     values.update(realised_moments(prior_returns))
     for family, history in sorted(family_pnl.items()):
         for name, value in lagged_results(history).items():

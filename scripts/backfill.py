@@ -54,6 +54,13 @@ def main() -> int:
     parser.add_argument("--days", type=int, default=400, help="calendar days to walk back")
     parser.add_argument("--no-fit", action="store_true", help="build the dataset only")
     parser.add_argument(
+        "--label-top-k",
+        type=int,
+        default=1,
+        help="label across the top k ranked candidates instead of the single best, "
+        "which shrinks the winner's curse that reconstruction noise creates",
+    )
+    parser.add_argument(
         "--relative-spread",
         type=float,
         default=None,
@@ -141,8 +148,19 @@ def main() -> int:
 
     scenarios = build_scenarios(gateway, config)
     samples = build_samples(
-        snapshots, settlements, scenarios, config, rank, build_features=build_features
+        snapshots,
+        settlements,
+        scenarios,
+        config,
+        rank,
+        build_features=build_features,
+        label_top_k=arguments.label_top_k,
     )
+    if arguments.label_top_k > 1:
+        print(
+            f"labels taken across the top {arguments.label_top_k} ranked candidates; "
+            "the agent still trades the first"
+        )
     print(f"{len(samples)} labelled samples across the families\n")
 
     by_family: dict[str, list] = {}

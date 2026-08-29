@@ -52,6 +52,13 @@ SHARED_FEATURES: tuple[str, ...] = (
     "slope_up",
     "slope_dn",
     "gex_balance",
+    # Flow, which survives reconstruction where the book does not. tape_put_share
+    # is the one to watch: it is the traded counterpart of implied skew, and skew
+    # is the documented driver.
+    "tape_volume",
+    "tape_breadth",
+    "tape_concentration",
+    "tape_put_share",
     "rv_lag1",
     "ret_lag1",
     "rv_5",
@@ -135,12 +142,17 @@ def build_samples(
     config: Config,
     rank,
     build_features=None,
+    label_top_k: int = 1,
 ) -> list[Sample]:
     """Walk the recorded sessions in order and label each family's choice.
 
     ``rank`` is the live cycle's own ranking function, passed in rather than
     reimplemented, so the candidate labelled here is provably the candidate the
     agent would have opened.
+
+    ``label_top_k`` is how many of the ranked candidates the label is taken
+    across; one reproduces labelling the exact trade. See the note at the
+    labelling step for why a rebuilt chain may want more than one.
 
     ``build_features`` defaults to the live feature engine. A rebuilt session
     has no Greeks and no book, so the backfill passes its own builder rather
@@ -222,11 +234,41 @@ def build_samples(
                 [_Priced(candidate, estimate) for candidate, estimate in priced], tie_break
             )
             best = ordered[0]
-            gross = settlement_pnl_of(
+
+            # Which of the ranked candidates the label is taken from.
+            #
+            # One is what the agent actually trades, and for a recorded chain it
+            # is plainly the right answer: label the decision that was made. On a
+            # rebuilt chain it is less obviously right. The ranking maximises net
+            # edge over prices carrying reconstruction noise, so the candidate it
+            # crowns is partly the one whose print is most wrong, and a label
+            # attached to it measures that error as much as the strategy. Taking
+            # the median outcome across the top few is the usual shrinkage
+            # against that winner's curse.
+            #
+            # The trade is unchanged either way: the agent opens ordered[0]. This
+            # only decides what the model is taught to recognise.
+            top = ordered[: max(label_top_k, 1)]
+            outcomes = [
+                (
+                    settlement_pnl_of(
+                        entry.candidate, entry.estimate.profile.net_entry_debit, settlement
+                    ),
+                    entry.estimate.cost.total,
+                )
+                for entry in top
+            ]
+            nets = sorted(gross - cost for gross, cost in outcomes)
+            net = nets[len(nets) // 2]
+            gross = sorted(gross for gross, _ in outcomes)[len(outcomes) // 2]
+            cost = sorted(cost for _, cost in outcomes)[len(outcomes) // 2]
+
+            # The family's own lagged results follow the trade, not the label,
+            # because that series is what the agent really earned.
+            traded_net = settlement_pnl_of(
                 best.candidate, best.estimate.profile.net_entry_debit, settlement
-            )
-            net = gross - best.estimate.cost.total
-            history.setdefault(str(family), []).append(net)
+            ) - best.estimate.cost.total
+            history.setdefault(str(family), []).append(traded_net)
             samples.append(
                 Sample(
                     session_date=snapshot.session_date,
@@ -234,7 +276,7 @@ def build_samples(
                     features=dict(row.values),
                     label=1 if net > 0.0 else 0,
                     gross_pnl=round(gross, 2),
-                    cost=round(best.estimate.cost.total, 2),
+                    cost=round(cost, 2),
                     net_pnl=round(net, 2),
                     description=best.candidate.description,
                 )
