@@ -82,6 +82,13 @@ classifier:
   min_train_days: 60                # burn-in below which the rule fallback runs instead
   confidence_band: 0.03             # stand down when |p - 0.5| falls inside this
   l2_c: 1.0                         # inverse regularisation strength
+  # How far above the majority baseline an out-of-sample hit rate must sit
+  # before the fitted model is allowed into the live path, measured in standard
+  # errors of that baseline rather than in a flat margin someone chose. A
+  # family that does not clear it keeps the documented rule, which is the
+  # better outcome: a model that has learned only the base rate still looks
+  # like evidence, and that is worse than a rule that admits what it is.
+  min_skill_sigmas: 2.0
 
 risk:
   risk_pct_per_structure: 0.01      # 1% of equity

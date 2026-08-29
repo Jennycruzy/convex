@@ -43,6 +43,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
+from zoneinfo import ZoneInfo
 from typing import Iterable, Sequence
 
 import numpy as np
@@ -546,4 +547,114 @@ def build(
         entries=tuple(consistent),
         strikes_requested=len(contracts),
         printed=len(entries),
+    )
+
+
+@dataclass(frozen=True)
+class RebuiltWindow:
+    """Every session a window could rebuild, ready to label or replay."""
+
+    snapshots: list[ChainSnapshot]
+    settlements: dict[date, float]
+    sessions: dict[date, ReconstructedSession]
+    coverages: list[float]
+    dropped_thin: int
+    modelled_relative_spread: float
+
+    def describe(self) -> dict:
+        import statistics
+
+        return {
+            "reconstructed": True,
+            "sessions": len(self.snapshots),
+            "median_coverage": (
+                round(statistics.median(self.coverages), 3) if self.coverages else 0.0
+            ),
+            "dropped_thin": self.dropped_thin,
+            "modelled_relative_spread": self.modelled_relative_spread,
+        }
+
+    def feature_builder(self):
+        """The predictor builder these sessions must be labelled with.
+
+        Handed to training.build_samples in place of the live feature engine,
+        which reads Greeks and a book that a rebuilt session does not have.
+        """
+
+        def build_features(entries, spot, taken_at, close_at, prior_returns, family_pnl):
+            return features(
+                self.sessions[taken_at.date()], taken_at, close_at, prior_returns, family_pnl
+            )
+
+        return build_features
+
+
+def rebuild_window(
+    gateway,
+    config: Config,
+    days: int,
+    relative_spread: float,
+    on_session=None,
+) -> RebuiltWindow:
+    """Rebuild every session in the trailing window, in calendar order.
+
+    Shared by the training backfill and the replay so that both see exactly the
+    same sessions built exactly the same way. A session whose ladder barely
+    printed is dropped and counted rather than carried in thin.
+    """
+    zone = ZoneInfo(config.str_("session.timezone"))
+    symbol = config.str_("underlying.symbol")
+    entry_time = time.fromisoformat(config.str_("reconstruction.entry_time"))
+    close_time = time.fromisoformat(config.str_("session.close_time"))
+    minimum = config.float_("reconstruction.min_coverage")
+
+    now, _ = gateway.clock()
+    end = now.date()
+    start = end - timedelta(days=days)
+    sessions = gateway.sessions(start, end)
+    if not sessions:
+        raise DataError(f"Alpaca's calendar lists no session between {start} and {end}")
+
+    bars = gateway.minute_bars(
+        symbol,
+        datetime.combine(start, time(0, 0), tzinfo=zone),
+        datetime.combine(end, time(23, 59), tzinfo=zone),
+    )
+
+    snapshots: list[ChainSnapshot] = []
+    settlements: dict[date, float] = {}
+    rebuilt: dict[date, ReconstructedSession] = {}
+    coverages: list[float] = []
+    thin = 0
+    for session in sessions:
+        day = session.session_date
+        entry_at = datetime.combine(day, entry_time, tzinfo=zone)
+        close_at = datetime.combine(day, close_time, tzinfo=zone)
+        before_entry = bars[bars.index <= entry_at]
+        before_close = bars[bars.index <= close_at]
+        if before_entry.empty or before_close.empty:
+            continue
+        spot_at_entry = float(before_entry.iloc[-1]["close"])
+        spot_at_close = float(before_close.iloc[-1]["close"])
+
+        session_data = build(
+            gateway, config, day, entry_at, close_at, spot_at_entry, spot_at_close
+        )
+        coverages.append(session_data.coverage)
+        if on_session is not None:
+            on_session(session_data)
+        if session_data.coverage < minimum:
+            thin += 1
+            continue
+        snapshots.append(as_snapshot(session_data, entry_at, relative_spread))
+        settlements[day] = spot_at_close
+        rebuilt[day] = session_data
+
+    return RebuiltWindow(
+        snapshots=snapshots,
+        settlements=settlements,
+        sessions=rebuilt,
+        coverages=coverages,
+        dropped_thin=thin,
+        modelled_relative_spread=relative_spread,
     )

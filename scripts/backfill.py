@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import statistics
 import sys
 from datetime import date, datetime, time as dtime, timedelta
@@ -193,12 +194,19 @@ def main() -> int:
             # insofar as it beats this.
             base_rate = float(max(realised.mean(), 1.0 - realised.mean()))
             fired = float((probabilities > 0.5).mean())
+            # One standard error of the baseline on this many sessions. Skill
+            # smaller than a couple of these is a handful of coin flips.
+            sigma = math.sqrt(
+                max(base_rate * (1.0 - base_rate), 1e-12) / probabilities.size
+            )
+            margin = config.float_("classifier.min_skill_sigmas") * sigma
             report[name].update(
                 {
                     "out_of_sample_sessions": int(probabilities.size),
                     "hit_rate": round(hits, 4),
                     "majority_baseline": round(base_rate, 4),
                     "skill_over_baseline": round(hits - base_rate, 4),
+                    "skill_required": round(margin, 4),
                     "share_of_sessions_traded": round(fired, 4),
                     "brier": round(brier_score(probabilities, realised), 4),
                     "calibration_slope": round(
@@ -212,7 +220,7 @@ def main() -> int:
                 f"({hits - base_rate:+.3f})   "
                 f"Brier {brier_score(probabilities, realised):.4f}   "
                 f"calib {calibration_slope(probabilities, realised):.3f}   "
-                f"trades {fired:.1%} of sessions"
+                f"trades {fired:.1%}   needs {margin:+.3f}"
             )
         else:
             report[name]["out_of_sample_sessions"] = 0
@@ -231,12 +239,13 @@ def main() -> int:
         # path in place of the documented rule — which is worse than the rule,
         # because it looks like evidence. Standing down is the better outcome.
         skill = report[name].get("skill_over_baseline")
+        needed = report[name].get("skill_required")
         if model is None:
             continue
-        if skill is None or skill <= 0.0:
+        if skill is None or needed is None or skill < needed:
             print(
-                f"  {name:<16} not written: {skill:+.3f} against the baseline "
-                "is not skill, so the documented rule decides this family"
+                f"  {name:<16} not written: {skill:+.3f} against the baseline does "
+                f"not clear {needed:+.3f}, so the documented rule decides this family"
             )
             continue
         models[family] = model

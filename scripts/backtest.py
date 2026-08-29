@@ -22,7 +22,7 @@ import pathlib
 import sys
 from zoneinfo import ZoneInfo
 
-from convex import archive, backtest, training
+from convex import archive, backtest, reconstruct, training
 from convex.agent import rank
 from convex.classifier import fit_family
 from convex.config import load
@@ -33,7 +33,7 @@ from convex.structures.base import Family
 from scripts.train import settlements
 
 
-def out_of_sample_probabilities(samples, config) -> dict:
+def out_of_sample_probabilities(samples, config, names_for=None) -> dict:
     """Expanding-window probability per family per session.
 
     Session t is scored by a model fitted only on that family's sessions before
@@ -41,6 +41,7 @@ def out_of_sample_probabilities(samples, config) -> dict:
     arm cannot trade on a model that did not exist yet.
     """
     minimum = config.int_("classifier.min_train_days")
+    names_for = names_for or training.feature_names_for
     probabilities: dict = {}
     for name in config.list_("structures.enabled"):
         family = Family(str(name))
@@ -49,8 +50,8 @@ def out_of_sample_probabilities(samples, config) -> dict:
         )
         if len(rows) <= minimum:
             continue
-        matrix, labels = training.to_matrix(rows, family)
-        names = training.feature_names_for(family)
+        names = names_for(family)
+        matrix, labels = training.to_matrix(rows, family, names)
         per_day: dict = {}
         for index in range(minimum, matrix.shape[0]):
             model, _ = fit_family(family, matrix[:index], labels[:index], names, config)
@@ -69,6 +70,20 @@ def show(value, places: int = 3, width: int = 8) -> str:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
+        "--reconstructed",
+        action="store_true",
+        help="replay sessions rebuilt from the option tape instead of recorded chains",
+    )
+    parser.add_argument(
+        "--days", type=int, default=400, help="with --reconstructed, days to walk back"
+    )
+    parser.add_argument(
+        "--relative-spread",
+        type=float,
+        default=0.05,
+        help="with --reconstructed, the modelled relative spread per leg",
+    )
+    parser.add_argument(
         "--json",
         nargs="?",
         const="",
@@ -81,29 +96,58 @@ def main() -> int:
     zone = ZoneInfo(config.str_("session.timezone"))
     chains = config.path_("paths.chain_archive")
 
-    recorded = archive.sessions(chains)
-    if not recorded:
-        print(
-            "no recorded chains to replay. The agent archives each 10:00 snapshot "
-            "as it runs; there are none yet."
-        )
-        return 1
-
     gateway = AlpacaGateway(config)
-    closes = settlements(gateway, symbol, recorded, zone)
     scenarios = build_scenarios(gateway, config)
+    names_for = training.feature_names_for
+    provenance = "recorded"
+
+    if arguments.reconstructed:
+        window = reconstruct.rebuild_window(
+            gateway, config, arguments.days, arguments.relative_spread
+        )
+        if not window.snapshots:
+            print("no session could be rebuilt; nothing to replay")
+            return 1
+        print(
+            f"rebuilt {len(window.snapshots)} sessions from the option tape, "
+            f"median ladder coverage {window.describe()['median_coverage']:.2f}, "
+            f"modelled spread {window.modelled_relative_spread:.3f} per leg"
+        )
+        print(
+            "  These sessions were reconstructed, not recorded. The book for them "
+            "is gone: the spread is modelled rather than measured, the liquidity "
+            "and open-interest features are absent, and entry prices are prints."
+        )
+        snapshots = window.snapshots
+        closes = window.settlements
+        build_features = window.feature_builder()
+        names_for = training.reconstructed_feature_names_for
+        provenance = "reconstructed"
+    else:
+        recorded = archive.sessions(chains)
+        if not recorded:
+            print(
+                "no recorded chains to replay. The agent archives each 10:00 snapshot "
+                "as it runs; there are none yet. Pass --reconstructed to replay "
+                "sessions rebuilt from the option tape instead."
+            )
+            return 1
+        snapshots = list(archive.read_all(chains))
+        closes = settlements(gateway, symbol, recorded, zone)
+        build_features = None
+
     samples = training.build_samples(
-        list(archive.read_all(chains)), closes, scenarios, config, rank
+        snapshots, closes, scenarios, config, rank, build_features=build_features
     )
     if not samples:
         print("no session could be labelled; nothing to replay")
         return 1
 
-    probabilities = out_of_sample_probabilities(samples, config)
+    probabilities = out_of_sample_probabilities(samples, config, names_for)
     report = backtest.run(samples, probabilities, config.float_("risk.es_confidence"))
 
     sessions = report.sessions
-    print(f"\nreplayed {sessions} recorded session(s)\n")
+    print(f"\nreplayed {sessions} {provenance} session(s)\n")
     if sessions < 30:
         print(
             f"  Note: {sessions} sessions is far too few for a Sharpe ratio to mean "
