@@ -169,7 +169,22 @@ Tests:
 .venv/bin/python -m pytest
 ```
 
-The suite starts the real Alpaca MCP server as a subprocess and asserts against the tool surface it actually exposes. Tests that need live market behaviour talk to the paper account. Nothing in this repository mocks a chain, stubs a quote, or returns a canned price.
+The suite starts the real Alpaca MCP server as a subprocess and asserts against the
+tool surface it actually exposes. Nothing in this repository mocks a chain, stubs a
+quote, or returns a canned price.
+
+The integration suite talks to the live paper account and is run separately:
+
+```bash
+.venv/bin/python -m pytest tests/integration -s
+```
+
+It skips cleanly without credentials. With them it measures the real per-leg spread,
+checks the strike increment and multiplier against the chain rather than the
+configuration, reads Alpaca's own calendar for the competition window, runs a full
+decision cycle with only the write withheld, and asserts that a candidate really is
+refused because its execution cost consumed its edge — a check that has never been
+observed firing has not been demonstrated. Use `-s` to see the measured figures.
 
 ---
 

@@ -32,6 +32,9 @@ include = ["convex*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# The integration suite talks to the live paper account and skips without
+# credentials. Run it on its own with: pytest tests/integration -s
+norecursedirs = ["tests/integration"]
 
 [tool.ruff]
 line-length = 100
