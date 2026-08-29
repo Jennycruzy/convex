@@ -7,6 +7,19 @@
 # they were measured and the script that produced them. Values marked HYPOTHESIS
 # have not been measured yet and must not be relied on in a live decision.
 
+# The keys below that are still unmeasured, named where code can read them
+# rather than only where a person can. The calibration check refuses to open a
+# position while any of them is listed, which is what makes the sentence above
+# a rule rather than an intention. Calibration removes a key from this list at
+# the same time as it replaces the value it names.
+provenance:
+  hypothesis:
+    - session.pin_band_pct
+    - costs.slippage_ticks_per_leg
+    - costs.per_contract_fee
+    - costs.regulatory_fee_per_contract
+    - liquidity.max_relative_spread
+
 underlying:
   symbol: SPY
   contract_multiplier: 100          # MEASURED at runtime from the contract record

@@ -148,6 +148,54 @@ class KillSwitchGate:
         return GateResult(self.name, self.scope, not engaged, detail)
 
 
+class CalibrationGate:
+    """Refuse to open a position on numbers that have never been measured.
+
+    config/convex.yaml marks a value HYPOTHESIS until it has been measured
+    against real SPY quotes, and until now that marking was a comment: nothing
+    stopped a live decision reading one. Two of those values are the per-contract
+    fees, which stand at zero. Trading on them would understate cost inside the
+    net-of-cost hurdle, which is the one number this project exists to get right,
+    and it would understate it in the direction that makes a candidate look
+    tradeable when it is not.
+
+    Standing down here is the correct outcome, not a failure: it is cheaper to
+    trade nothing than to trade on a cost model that was assumed.
+    """
+
+    name = "calibration"
+    scope = "session"
+
+    # What a live decision actually reads. A value that only a backtest touches
+    # does not belong here; the replay is allowed to run on hypotheses so long
+    # as it says so, and it does.
+    REQUIRED = (
+        "costs.slippage_ticks_per_leg",
+        "costs.per_contract_fee",
+        "costs.regulatory_fee_per_contract",
+        "liquidity.max_relative_spread",
+        "session.pin_band_pct",
+    )
+
+    def check(self, context, candidate, estimate, size) -> GateResult:
+        unmeasured = context.config.unmeasured(*self.REQUIRED)
+        if unmeasured:
+            return GateResult(
+                self.name,
+                self.scope,
+                False,
+                "never measured against live quotes: "
+                + ", ".join(unmeasured)
+                + " — run scripts/calibrate_costs.py while the market is open",
+            )
+        return GateResult(
+            self.name,
+            self.scope,
+            True,
+            "every cost and liquidity input has been measured against live quotes",
+        )
+
+
 class MarketCalendarGate:
     name = "market_calendar"
     scope = "session"
@@ -446,6 +494,7 @@ def _require(candidate: Candidate | None, estimate: EdgeEstimate | None) -> None
 
 SESSION_GATES: tuple[Gate, ...] = (
     KillSwitchGate(),
+    CalibrationGate(),
     MarketCalendarGate(),
     DailyLossLimitGate(),
     BuyingPowerGate(),

@@ -78,6 +78,26 @@ class Config:
         """Resolve a configured path relative to the repository root."""
         return (self.path.parent.parent / self.str_(dotted)).resolve()
 
+    def hypotheses(self) -> tuple[str, ...]:
+        """The keys whose values have not been measured against live quotes.
+
+        A key named here that does not exist is a typo, and a typo in this list
+        would quietly shrink the set of values being guarded, so it raises.
+        """
+        listed = self.get("provenance.hypothesis")
+        if not isinstance(listed, list) or not all(isinstance(key, str) for key in listed):
+            raise ConfigError(
+                f"provenance.hypothesis must be a list of config keys in {self.path}"
+            )
+        for key in listed:
+            self.get(key)
+        return tuple(listed)
+
+    def unmeasured(self, *keys: str) -> tuple[str, ...]:
+        """Which of the given keys are still hypotheses, in the order asked."""
+        listed = set(self.hypotheses())
+        return tuple(key for key in keys if key in listed)
+
 
 def load(path: Path | str | None = None) -> Config:
     """Return the current configuration, re-reading the file if it has changed."""

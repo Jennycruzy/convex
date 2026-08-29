@@ -23,7 +23,7 @@ from convex.config import load
 from convex.data.alpaca import AlpacaGateway
 from convex.errors import ConvexError
 from convex.features import time_to_close_years
-from convex.ledger import Action, Ledger
+from convex.ledger import Action, Ledger, Record, new_cycle_id
 from convex.scenarios import build as build_scenarios
 from convex.scenarios import save as save_scenarios
 
@@ -81,6 +81,20 @@ def main() -> int:
     now, _ = live.clock()
     sessions = live.sessions(now.date(), now.date())
     if not sessions:
+        # Law 4: a refusal is a decision and leaves the same receipt as a trade.
+        # The cycle returns here before the agent runs, so the record it would
+        # otherwise have written has to be written here instead.
+        ledger.append(
+            Record(
+                action=Action.STAND_DOWN,
+                cycle_id=new_cycle_id(),
+                rationale=(
+                    f"No trade on {now.date()}: Alpaca's calendar lists no session. "
+                    "Nothing was priced and nothing was sent."
+                ),
+                reject_reason="market_calendar",
+            )
+        )
         print(f"no session on {now.date()}; nothing to do")
         return 0
     tau = time_to_close_years(now, sessions[0].close_at)

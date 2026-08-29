@@ -10,6 +10,7 @@ import numpy as np
 import pytest
 
 from convex.config import load
+from convex.errors import ConfigError
 from convex.costs import CostModel
 from convex.edge import evaluate
 from convex.gates import (
@@ -34,6 +35,20 @@ NOW = datetime.now(timezone.utc)
 @pytest.fixture
 def config():
     return load()
+
+
+@pytest.fixture
+def measured(config):
+    """The configuration as it stands once calibration has replaced the guesses.
+
+    A session test that is about some other gate uses this, so the calibration
+    check standing down cannot mask the gate actually under test.
+    """
+    return type(config)(
+        path=config.path,
+        loaded_mtime=config.loaded_mtime,
+        values={**config.values, "provenance": {"hypothesis": []}},
+    )
 
 
 @pytest.fixture
@@ -167,8 +182,8 @@ def test_nothing_clears_the_hurdle_when_the_chain_prices_the_distribution(
     )
 
 
-def test_session_gates_pass_on_an_ordinary_open(config, tmp_path):
-    assert run_session_gates(context(config, tmp_path)).passed
+def test_session_gates_pass_on_an_ordinary_open(measured, tmp_path):
+    assert run_session_gates(context(measured, tmp_path)).passed
 
 
 def test_kill_switch_stops_the_session(config, tmp_path):
@@ -179,8 +194,8 @@ def test_kill_switch_stops_the_session(config, tmp_path):
     assert report.first_failure.name == "kill_switch"
 
 
-def test_daily_loss_limit_stops_the_session(config, tmp_path):
-    report = run_session_gates(context(config, tmp_path, equity=96_000.0))
+def test_daily_loss_limit_stops_the_session(measured, tmp_path):
+    report = run_session_gates(context(measured, tmp_path, equity=96_000.0))
     assert not report.passed
     assert {f.name for f in report.failures} == {"daily_loss_limit"}
 
@@ -191,8 +206,8 @@ def test_closed_day_and_submission_cutoff_both_stop_the_session(config, tmp_path
     assert not run_session_gates(late).passed
 
 
-def test_cost_budget_stops_the_session(config, tmp_path):
-    report = run_session_gates(context(config, tmp_path, cumulative_fees=2_500.0))
+def test_cost_budget_stops_the_session(measured, tmp_path):
+    report = run_session_gates(context(measured, tmp_path, cumulative_fees=2_500.0))
     assert not report.passed
     assert report.first_failure.name == "cost_budget"
 
@@ -268,3 +283,52 @@ def test_concurrency_and_tail_caps_both_bind(config, tmp_path, candidate, estima
     failures = {f.name for f in run_candidate_gates(full, candidate, estimate, size).failures}
     assert "concurrency" in failures
     assert "expected_shortfall" in failures
+
+
+# ------------------------------------------------- calibration provenance
+
+
+def test_the_hypothesis_list_matches_the_comments_that_mark_them(config):
+    """The list the code reads and the markings a reader sees must agree.
+
+    Drift between them is the failure this pair is meant to prevent: a value
+    silently dropped from the list would stop being guarded while still reading
+    as unmeasured to anyone opening the file.
+    """
+    marked = set()
+    for line in config.path.read_text().splitlines():
+        if "HYPOTHESIS" not in line or ":" not in line:
+            continue
+        key = line.split(":", 1)[0].strip()
+        if key.startswith("#"):
+            continue
+        marked.add(key)
+
+    listed = {key.split(".")[-1] for key in config.hypotheses()}
+    assert marked <= listed, f"marked HYPOTHESIS but not listed: {marked - listed}"
+
+
+def test_a_hypothesis_naming_a_key_that_does_not_exist_raises(config):
+    broken = type(config)(
+        path=config.path,
+        loaded_mtime=config.loaded_mtime,
+        values={**config.values, "provenance": {"hypothesis": ["costs.no_such_key"]}},
+    )
+    with pytest.raises(ConfigError, match="no_such_key"):
+        broken.hypotheses()
+
+
+def test_the_session_stands_down_while_a_cost_input_is_still_unmeasured(
+    config, tmp_path
+):
+    """Shipped state: the fees are zero and have never been measured."""
+    report = run_session_gates(context(config, tmp_path))
+    failure = report.first_failure
+    assert failure is not None
+    assert failure.name == "calibration"
+    assert "per_contract_fee" in failure.detail
+
+
+def test_the_session_proceeds_once_every_input_has_been_measured(measured, tmp_path):
+    report = run_session_gates(context(measured, tmp_path))
+    assert report.passed, [f.detail for f in report.failures]

@@ -294,30 +294,44 @@ class AlpacaGateway:
     def minute_bars(self, symbol: str, start: datetime, end: datetime) -> pd.DataFrame:
         """Minute bars for the underlying, used to build the return history.
 
-        The tool caps a page at ten thousand points, and a two-year minute
-        history is thirty times that, so this pages until the server stops
-        offering a token. Every page is kept; none is sampled or thinned.
+        The tool caps a page at ten thousand points and a two-year minute
+        history is thirty times that, so the history has to be collected in
+        pieces. Unlike the contract and option-bar tools, this one takes no
+        page token: the server (3.4.7) rejects the argument outright rather
+        than ignoring it. So the walk is done on time instead, carrying the
+        start forward to the minute after the last bar of the page just read
+        and asking again. Every page is kept; none is sampled or thinned.
+
+        A page that comes back full but does not move the clock forward would
+        spin here forever, so that raises rather than looping.
         """
         rows: list[dict] = []
-        page_token: str | None = None
-        while True:
+        cursor = start
+        while cursor < end:
             arguments: dict[str, Any] = {
                 "symbols": symbol,
                 "timeframe": "1Min",
-                "start": start.isoformat(),
+                "start": cursor.isoformat(),
                 "end": end.isoformat(),
                 "limit": _MAX_BARS_PER_PAGE,
                 "feed": self._stock_feed,
                 "sort": "asc",
             }
-            if page_token:
-                arguments["page_token"] = page_token
             raw = self._client.call("get_stock_bars", arguments)
             bars = _require(raw, "bars", "get_stock_bars")
-            rows.extend(bars.get(symbol) or [])
-            page_token = raw.get("next_page_token")
-            if not page_token:
+            page = bars.get(symbol) or []
+            if not page:
                 break
+            rows.extend(page)
+            if len(page) < _MAX_BARS_PER_PAGE:
+                break
+            last = _stamp(_require(page[-1], "t", "minute bar"), "minute bar")
+            if last <= cursor:
+                raise DataError(
+                    f"get_stock_bars returned a full page for {symbol} ending at "
+                    f"{last.isoformat()}, which does not advance past {cursor.isoformat()}"
+                )
+            cursor = last + timedelta(minutes=1)
 
         if not rows:
             raise DataError(

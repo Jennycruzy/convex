@@ -80,7 +80,7 @@ convex/costs.py           half-spread per leg + slippage + exit reserve
 convex/edge.py            gross edge, net edge, expected shortfall, win rate
         │
         ▼
-convex/gates.py           thirteen checks, session-scope and candidate-scope
+convex/gates.py           fifteen checks, session-scope and candidate-scope
 convex/sizing.py          one function, no override parameter
 convex/rationale.py       the written explanation, before the order
 convex/ledger.py          append-only JSONL — every decision, including refusals
@@ -100,22 +100,23 @@ Every one must pass, and every verdict — pass or fail — is written to the le
 **Session scope**, run once before anything is priced:
 
 1. **Kill switch** — an append-only file, checked every cycle
-2. **Market calendar** — from Alpaca's own calendar, never from a local holiday table
-3. **Daily loss limit** — 3% of equity, then halt and publish
-4. **Buying power** — verified against the account, never assumed
-5. **Cost budget** — cumulative execution cost capped at 2% of equity
+2. **Calibration** — no position is opened while any cost or liquidity input is still an unmeasured guess. The config names its own unmeasured values where the code reads them, not only in a comment, and this check refuses the session until real quotes have replaced them. The per-contract fees ship at zero, and a zero fee understates the net-of-cost hurdle in the one direction that matters
+3. **Market calendar** — from Alpaca's own calendar, never from a local holiday table
+4. **Daily loss limit** — 3% of equity, then halt and publish
+5. **Buying power** — verified against the account, never assumed
+6. **Cost budget** — cumulative execution cost capped at 2% of equity
 
 **Candidate scope**, run on the best candidate of each family:
 
-6. **Max loss computable and within budget** — the agent is structurally incapable of submitting a position whose worst case it cannot compute
-7. **Net-of-cost hurdle** — edge must exceed half-spread × legs + slippage. *The most important check in the system.*
-8. **Leg-count preference** — two legs beat four at comparable net edge, because each leg is another half-spread
-9. **Liquidity** — reject any leg whose relative spread exceeds the measured threshold
-10. **Expected shortfall cap** — projected portfolio ES(1%) within 3% of equity
-11. **Assignment** — no leg that can settle into shares survives the final thirty minutes
-12. **Classifier confidence** — stand down when probabilities cluster at 0.5
-13. **Feature staleness** — never trade off a stale chain
-14. **Concurrency** — at most four open structures
+7. **Max loss computable and within budget** — the agent is structurally incapable of submitting a position whose worst case it cannot compute
+8. **Net-of-cost hurdle** — edge must exceed half-spread × legs + slippage. *The most important check in the system.*
+9. **Leg-count preference** — two legs beat four at comparable net edge, because each leg is another half-spread
+10. **Liquidity** — reject any leg whose relative spread exceeds the measured threshold
+11. **Expected shortfall cap** — projected portfolio ES(1%) within 3% of equity
+12. **Assignment** — no leg that can settle into shares survives the final thirty minutes
+13. **Classifier confidence** — stand down when probabilities cluster at 0.5
+14. **Feature staleness** — never trade off a stale chain
+15. **Concurrency** — at most four open structures
 
 Standing down is a first-class outcome, logged and published with its reasoning. An agent that knows when not to trade is a stronger result than one that always fires.
 
@@ -198,7 +199,7 @@ observed firing has not been demonstrated. Use `-s` to see the measured figures.
   an edge, and printing it would be the most misleading number this project could
   publish. Over a four-session window this means no Sharpe is reported at all, which
   is the correct outcome rather than a gap.
-- **Four trading sessions is not a track record.** P&L across this window is substantially variance. The reproducible parts of this project are the cost discipline, the risk checks and the receipts.
+- **A handful of sessions is not a track record.** Alpaca's calendar puts six in this window (Aug 28, 31, Sep 1, 2, 3, 4), and CONVEX will trade fewer. P&L across it is substantially variance. The reproducible parts of this project are the cost discipline, the risk checks and the receipts.
 
 ---
 
