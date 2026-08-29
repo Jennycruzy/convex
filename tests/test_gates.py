@@ -15,6 +15,7 @@ from convex.costs import CostModel
 from convex.edge import evaluate
 from convex.gates import (
     ALL_GATES,
+    CalibrationGate,
     GateContext,
     LiquidityGate,
     run_candidate_gates,
@@ -47,7 +48,16 @@ def measured(config):
     return type(config)(
         path=config.path,
         loaded_mtime=config.loaded_mtime,
-        values={**config.values, "provenance": {"hypothesis": []}},
+        values={
+            **config.values,
+            # Only the blocking list is emptied. The bounds stay exactly as
+            # shipped, because a session running on deliberate over-estimates is
+            # the normal case until a fill exists to measure them from.
+            "provenance": {
+                **config.values["provenance"],
+                "hypothesis": [],
+            },
+        },
     )
 
 
@@ -321,11 +331,44 @@ def test_the_hypothesis_list_matches_the_comments_that_mark_them(config):
     assert marked <= listed, f"marked HYPOTHESIS but not listed: {marked - listed}"
 
 
+def test_the_bound_list_matches_the_comments_that_mark_them(config):
+    """The same guard for the second list.
+
+    A value marked BOUND but absent from conservative_bound reads to anyone
+    opening the file as though it were still being watched, while the session
+    says nothing about it at all.
+    """
+    marked = set()
+    for line in config.path.read_text().splitlines():
+        if "BOUND" not in line or ":" not in line:
+            continue
+        key = line.split(":", 1)[0].strip()
+        if key.startswith("#"):
+            continue
+        marked.add(key)
+
+    listed = {key.split(".")[-1] for key in config.bounds()}
+    assert marked <= listed, f"marked BOUND but not listed: {marked - listed}"
+
+
+def test_a_key_cannot_be_a_guess_and_a_bound_at_the_same_time(config):
+    """One is unsafe to trade on and the other is not, so the two lists have to
+    be disjoint or the gate's answer depends on which it happens to read."""
+    overlap = set(config.hypotheses()) & set(config.bounds())
+    assert not overlap, f"listed as both: {sorted(overlap)}"
+
+
 def test_a_hypothesis_naming_a_key_that_does_not_exist_raises(config):
     broken = type(config)(
         path=config.path,
         loaded_mtime=config.loaded_mtime,
-        values={**config.values, "provenance": {"hypothesis": ["costs.no_such_key"]}},
+        values={
+            **config.values,
+            "provenance": {
+                **config.values["provenance"],
+                "hypothesis": ["costs.no_such_key"],
+            },
+        },
     )
     with pytest.raises(ConfigError, match="no_such_key"):
         broken.hypotheses()
@@ -334,17 +377,53 @@ def test_a_hypothesis_naming_a_key_that_does_not_exist_raises(config):
 def test_the_session_stands_down_while_a_cost_input_is_still_unmeasured(
     config, tmp_path
 ):
-    """Shipped state: the fees are zero and have never been measured."""
+    """Shipped state: the liquidity threshold has never been measured.
+
+    It blocks and the fee bounds do not, which is the whole point of the split.
+    A threshold that is too permissive lets a bad leg through; a fee set above
+    what it can be only refuses a candidate that was marginal anyway.
+    """
     report = run_session_gates(context(config, tmp_path))
     failure = report.first_failure
     assert failure is not None
     assert failure.name == "calibration"
-    assert "per_contract_fee" in failure.detail
+    assert "liquidity.max_relative_spread" in failure.detail
+    assert "per_contract_fee" not in failure.detail
 
 
 def test_the_session_proceeds_once_every_input_has_been_measured(measured, tmp_path):
     report = run_session_gates(context(measured, tmp_path))
     assert report.passed, [f.detail for f in report.failures]
+    # Passing is not the same as being silent about it. The session says which
+    # figures are still bounds rather than measurements.
+    calibration = next(r for r in report.results if r.name == "calibration")
+    assert "over-estimates" in calibration.detail
+    assert "costs.per_contract_fee" in calibration.detail
+
+
+def test_a_bound_never_blocks_but_a_hypothesis_always_does(measured, tmp_path):
+    """The asymmetry, asserted directly.
+
+    Over-stating a cost can only refuse a trade that was marginally worth
+    taking. Under-stating one admits a trade that was not, which is the failure
+    the whole project is built to avoid, so only the second kind stops a
+    session.
+    """
+    assert set(measured.bounds()) & set(CalibrationGate.REQUIRED)
+    assert run_session_gates(context(measured, tmp_path)).passed
+
+    guessing = type(measured)(
+        path=measured.path,
+        loaded_mtime=measured.loaded_mtime,
+        values={
+            **measured.values,
+            "provenance": {
+                **measured.values["provenance"],
+                "hypothesis": ["costs.per_contract_fee"],
+            },
+        },
+    )
+    assert not run_session_gates(context(guessing, tmp_path)).passed
 
 
 def test_a_structure_risking_more_than_its_budget_is_refused(

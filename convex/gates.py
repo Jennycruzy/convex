@@ -179,6 +179,7 @@ class CalibrationGate:
 
     def check(self, context, candidate, estimate, size) -> GateResult:
         unmeasured = context.config.unmeasured(*self.REQUIRED)
+        bounded = [key for key in self.REQUIRED if key in context.config.bounds()]
         if unmeasured:
             return GateResult(
                 self.name,
@@ -187,6 +188,17 @@ class CalibrationGate:
                 "never measured against live quotes: "
                 + ", ".join(unmeasured)
                 + ". Run scripts/calibrate_costs.py while the market is open",
+            )
+        if bounded:
+            # Named, not waved through. These are safe to trade on because each
+            # one errs high, but the session should say out loud which figures
+            # are still bounds rather than measurements.
+            return GateResult(
+                self.name,
+                self.scope,
+                True,
+                "measured, except these which stand at deliberate over-estimates "
+                "pending a fill to measure them from: " + ", ".join(bounded),
             )
         return GateResult(
             self.name,

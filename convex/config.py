@@ -78,20 +78,35 @@ class Config:
         """Resolve a configured path relative to the repository root."""
         return (self.path.parent.parent / self.str_(dotted)).resolve()
 
-    def hypotheses(self) -> tuple[str, ...]:
-        """The keys whose values have not been measured against live quotes.
-
-        A key named here that does not exist is a typo, and a typo in this list
-        would quietly shrink the set of values being guarded, so it raises.
-        """
-        listed = self.get("provenance.hypothesis")
+    def _provenance(self, kind: str) -> tuple[str, ...]:
+        listed = self.get(f"provenance.{kind}")
         if not isinstance(listed, list) or not all(isinstance(key, str) for key in listed):
             raise ConfigError(
-                f"provenance.hypothesis must be a list of config keys in {self.path}"
+                f"provenance.{kind} must be a list of config keys in {self.path}"
             )
         for key in listed:
             self.get(key)
         return tuple(listed)
+
+    def hypotheses(self) -> tuple[str, ...]:
+        """Unmeasured keys that could be wrong in the dangerous direction.
+
+        A key named here that does not exist is a typo, and a typo in this list
+        would quietly shrink the set of values being guarded, so it raises.
+        """
+        return self._provenance("hypothesis")
+
+    def bounds(self) -> tuple[str, ...]:
+        """Unmeasured keys deliberately set beyond what they can plausibly be.
+
+        Trading on one of these is safe in a way that trading on a hypothesis is
+        not. Over-stating what execution costs refuses candidates that were
+        marginally worth taking; it never admits one that was not. Some of these
+        cannot be measured until a fill exists, so treating them the same as a
+        guess would leave the agent unable to trade and therefore unable to ever
+        measure them.
+        """
+        return self._provenance("conservative_bound")
 
     def unmeasured(self, *keys: str) -> tuple[str, ...]:
         """Which of the given keys are still hypotheses, in the order asked."""
