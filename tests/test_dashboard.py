@@ -518,3 +518,19 @@ def test_a_refusal_carries_its_reason_into_the_log(client):
     page = session.get("/").text
     assert "Spread too wide to cross." in page
     assert "refused" in page
+
+
+def test_the_receipts_heading_sits_on_the_log_it_names(client):
+    """It used to introduce the whole lower page while the log was far below.
+
+    A heading that names a thing has to be adjacent to it, or it reads as a
+    promise about something else.
+    """
+    session, path = client
+    write(path, Record(action=Action.STAND_DOWN, cycle_id="c1", rationale="Nothing."))
+    page = session.get("/").text
+    heading = page.index("EVERY DECISION")
+    log = page.index("<div class='log' data-log>")
+    assert heading < log
+    # Nothing but the panel head may come between them.
+    assert log - heading < 1200

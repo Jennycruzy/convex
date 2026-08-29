@@ -278,11 +278,11 @@ def create_app(config: Config | None = None) -> FastAPI:
         body.append("<div style='height:34px'></div>")
         body.append(
             _section(
-                "receipts",
-                "EVERY DECISION, INCLUDING EVERY REFUSAL",
-                "Written to an append-only ledger before the order existed. Nothing "
-                "on this page is computed here — it is read back out of what the "
-                "agent recorded at the moment it decided.",
+                "state",
+                "WHERE IT STANDS",
+                "Counted from receipts, not from a running tally kept alongside "
+                "them. Standing down is a first-class outcome here and is counted "
+                "as one.",
             )
         )
 
@@ -618,8 +618,14 @@ def _decision_log(rows: list[dict[str, Any]], limit: int = 500) -> str:
     trimmed = entries[-limit:]
 
     out = [
-        "<section class='reveal'><div class='rule'>log</div>",
-        "<div class='panel'>",
+        _section(
+            "receipts",
+            "EVERY DECISION, INCLUDING EVERY REFUSAL",
+            "Written to an append-only ledger before the order existed. Nothing "
+            "here is computed for display — it is read back out of what the agent "
+            "recorded at the moment it decided, refusals included.",
+        ),
+        "<div class='panel reveal' style='margin-top:18px'>",
         "<div class='panel-head'><h3>decision log</h3>",
         f"<div><span class='stat-key'>ENTRIES</span> "
         f"<span class='stat-val'>{len(entries)}</span>"
@@ -681,5 +687,5 @@ def _decision_log(rows: list[dict[str, Any]], limit: int = 500) -> str:
         "order existed</span>"
         "<a href='/api/ledger' class='faint'>/api/ledger</a></div>"
     )
-    out.append("</div></section>")
+    out.append("</div>")
     return "".join(out)
