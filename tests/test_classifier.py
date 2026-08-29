@@ -70,7 +70,7 @@ def test_standardisation_survives_a_constant_predictor(config, separable):
 
 def test_walk_forward_predicts_only_out_of_sample(config, separable):
     matrix, labels = separable
-    probabilities, realised = walk_forward(Family.PUT_BWB, matrix, labels, list("abcd"), config)
+    probabilities, realised, _ = walk_forward(Family.PUT_BWB, matrix, labels, list("abcd"), config)
     expected = matrix.shape[0] - config.int_("classifier.min_train_days")
     assert probabilities.size == expected == realised.size
     assert brier_score(probabilities, realised.astype(float)) < 0.25
@@ -99,3 +99,18 @@ def test_the_regime_rule_favours_downside_when_variance_is_high():
 def test_the_regime_rule_refuses_to_guess_without_history():
     with pytest.raises(DataError, match="five prior"):
         RegimeRule().regime(0.02, [0.01, 0.02])
+
+
+def test_the_walk_returns_the_rows_it_scored_not_just_how_many(config, separable):
+    """Pairing probabilities back to sessions by counting from the end breaks
+    the moment a fit declines, and it breaks silently, which is worse."""
+    matrix, labels = separable
+    probabilities, realised, indices = walk_forward(
+        Family.PUT_BWB, matrix, labels, list("abcd"), config
+    )
+    assert indices.size == probabilities.size == realised.size
+    # Every scored row is out of sample and the labels line up with the rows
+    # named, not with a slice taken off the tail.
+    minimum = config.int_("classifier.min_train_days")
+    assert indices.min() >= minimum
+    assert list(realised) == [int(labels[i]) for i in indices]

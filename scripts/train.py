@@ -110,7 +110,9 @@ def main() -> int:
         if matrix.shape[0] > minimum:
             # Out-of-sample: every probability comes from a model that never
             # saw the session it is predicting.
-            probabilities, realised = walk_forward(family, matrix, labels, names, config)
+            probabilities, realised, _ = walk_forward(
+                family, matrix, labels, names, config
+            )
             if probabilities.size:
                 hit = float(((probabilities > 0.5).astype(int) == realised).mean())
                 brier = brier_score(probabilities, realised)

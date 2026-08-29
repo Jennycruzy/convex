@@ -248,7 +248,7 @@ def test_recorded_chains_become_fitted_models_the_agent_can_use(tmp_path):
     assert model is not None and report.trained
     assert report.samples == len(days)
 
-    probabilities, realised = walk_forward(family, matrix, labels, names, config)
+    probabilities, realised, _ = walk_forward(family, matrix, labels, names, config)
     assert probabilities.size > 0
     assert realised.size == probabilities.size
     assert ((probabilities >= 0.0) & (probabilities <= 1.0)).all()

@@ -38,7 +38,7 @@ from convex.config import load
 from convex.data.alpaca import AlpacaGateway
 from convex.errors import ConvexError, DataError
 from convex.ledger import Action, Ledger, Record, new_cycle_id
-from convex import reconstruct
+from convex import backtest, reconstruct
 from convex.reconstruct import as_snapshot, build as rebuild
 from convex.structures.base import Family
 from convex.scenarios import build as build_scenarios
@@ -193,8 +193,12 @@ def main() -> int:
         print("\n--no-fit: nothing written")
         return 0
 
+    earnings: dict[str, float] = {}
+    fitted: dict[Family, object] = {}
+
     models: dict[Family, object] = {}
     reports = []
+    chosen: dict[Family, dict] = {}
     for name in sorted(by_family):
         family = Family(name)
         names = reconstructed_feature_names_for(family)
@@ -203,7 +207,9 @@ def main() -> int:
         # Out of sample first. Every session is predicted by a model fitted
         # only on the sessions before it, which is the only honest way to
         # report a hit rate on a strategy that will be run forward.
-        probabilities, realised = walk_forward(family, matrix, labels, names, config)
+        probabilities, realised, scored_at = walk_forward(
+            family, matrix, labels, names, config
+        )
         if probabilities.size:
             hits = float(((probabilities > 0.5).astype(int) == realised).mean())
             # The number that decides whether the hit rate means anything. When
@@ -218,6 +224,15 @@ def main() -> int:
                 max(base_rate * (1.0 - base_rate), 1e-12) / probabilities.size
             )
             margin = config.float_("classifier.min_skill_sigmas") * sigma
+
+            # Which sessions the model would have traded. What they earned is
+            # answered by the replay, below, and only there: this script used to
+            # total it a second way and the two answers differed by an order of
+            # magnitude on the same two hundred and seven trades.
+            chosen[family] = {
+                rows[index].session_date: float(probability)
+                for index, probability in zip(scored_at, probabilities)
+            }
             report[name].update(
                 {
                     "out_of_sample_sessions": int(probabilities.size),
@@ -226,6 +241,7 @@ def main() -> int:
                     "skill_over_baseline": round(hits - base_rate, 4),
                     "skill_required": round(margin, 4),
                     "share_of_sessions_traded": round(fired, 4),
+                    "share_traded": round(fired, 4),
                     "brier": round(brier_score(probabilities, realised), 4),
                     "calibration_slope": round(
                         calibration_slope(probabilities, realised), 4
@@ -250,22 +266,48 @@ def main() -> int:
 
         model, training_report = fit_family(family, matrix, labels, names, config)
         reports.append(training_report)
+        fitted[family] = model
 
-        # A model is only written if it beat the majority baseline out of
-        # sample. Below it, the model has learned the base rate and nothing
-        # else, and shipping it would put a fitted-looking thing in the live
-        # path in place of the documented rule, which is worse than the rule,
-        # because it looks like evidence. Standing down is the better outcome.
+
+    # What each family's model would actually have earned. Answered by the
+    # replay and by nothing else: this script used to total it a second way and
+    # the two disagreed by an order of magnitude on the same trades, which is
+    # what having two implementations of one number buys you.
+    replay = backtest.run(samples, chosen, config.float_("risk.es_confidence"))
+    for name, arms in replay.per_family.items():
+        earnings[name] = arms["classified"].net_total
+
+    print()
+    for name in sorted(by_family):
+        family = Family(name)
+        model = fitted.get(family)
         skill = report[name].get("skill_over_baseline")
         needed = report[name].get("skill_required")
+        earned = earnings.get(name)
+        report[name]["classified_net"] = (
+            None if earned is None else round(earned, 2)
+        )
         if model is None:
             continue
+
+        # Two conditions, and the second exists because the first was not
+        # enough. A family can be classified better than chance and still lose:
+        # the sessions it calls right are cheap and the ones it calls wrong are
+        # not. The first model ever to clear the skill bar did exactly that.
         if skill is None or needed is None or skill < needed:
             print(
                 f"  {name:<16} not written: {skill:+.3f} against the baseline does "
-                f"not clear {needed:+.3f}, so the documented rule decides this family"
+                f"not clear {needed:+.3f}, so the documented rule decides"
             )
             continue
+        if earned is None or earned <= 0.0:
+            print(
+                f"  {name:<16} not written: cleared the baseline by {skill:+.3f} "
+                f"but earned {earned:+,.2f} over the sessions it chose, so the "
+                "documented rule decides"
+            )
+            continue
+        print(f"  {name:<16} written: {skill:+.3f} skill, {earned:+,.2f} net")
         models[family] = model
 
     if models:

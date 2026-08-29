@@ -84,6 +84,10 @@ def main() -> int:
         help="with --reconstructed, the modelled relative spread per leg",
     )
     parser.add_argument(
+        "--label-top-k", type=int, default=1,
+        help="label across the top k ranked candidates (see convex/training.py)",
+    )
+    parser.add_argument(
         "--json",
         nargs="?",
         const="",
@@ -137,7 +141,8 @@ def main() -> int:
         build_features = None
 
     samples = training.build_samples(
-        snapshots, closes, scenarios, config, rank, build_features=build_features
+        snapshots, closes, scenarios, config, rank,
+        build_features=build_features, label_top_k=arguments.label_top_k,
     )
     if not samples:
         print("no session could be labelled; nothing to replay")

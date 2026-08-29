@@ -205,16 +205,24 @@ def walk_forward(
     labels: np.ndarray,
     feature_names: Sequence[str],
     config: Config,
-) -> tuple[np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Out-of-sample probabilities from an expanding window.
 
     Session t is predicted by a model fitted only on sessions before t, with
     the standardisation computed on those sessions alone. Sessions inside the
     burn-in are not predicted at all rather than predicted badly.
+
+    The row indices are returned alongside, and they matter. A fit can decline
+    to produce a model, at which point that session is skipped and the run of
+    probabilities is no longer one-per-session from the burn-in onwards.
+    Anything pairing these probabilities back against the sessions they belong
+    to has to use these indices; counting backwards from the end silently
+    misaligns every figure by however many were skipped.
     """
     minimum = config.int_("classifier.min_train_days")
     predictions: list[float] = []
     realised: list[int] = []
+    indices: list[int] = []
     for index in range(minimum, matrix.shape[0]):
         model, _ = fit_family(
             family, matrix[:index], labels[:index], feature_names, config
@@ -223,7 +231,8 @@ def walk_forward(
             continue
         predictions.append(model.probability(matrix[index]))
         realised.append(int(labels[index]))
-    return np.asarray(predictions), np.asarray(realised)
+        indices.append(index)
+    return np.asarray(predictions), np.asarray(realised), np.asarray(indices, dtype=int)
 
 
 @dataclass(frozen=True)
