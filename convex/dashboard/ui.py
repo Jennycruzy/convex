@@ -411,6 +411,32 @@ button.theme-toggle:focus-visible { outline: 1px solid var(--key); outline-offse
   100% { text-shadow: none; }
 }
 
+/* A light runs the length of the plotted series, over and over. This is the
+   one thing on the page allowed to loop, and it is allowed because it carries
+   no information: the series underneath it is already drawn and static, and
+   the pulse only says the instrument is live. pathLength is set to 100 on the
+   element so the dash figures are percentages of the line however wide the
+   chart is drawn. */
+.pulse {
+  stroke-dasharray: 8 92;
+  animation: pulse-run 3.4s linear infinite;
+  opacity: 0;
+}
+.pulse.on { opacity: 0.95; }
+@keyframes pulse-run { from { stroke-dashoffset: 100; } to { stroke-dashoffset: 0; } }
+
+/* The scrubber walks the measured points and fades in once it starts. */
+.scrub { transition: opacity 400ms var(--ease); }
+.scrub-line, .scrub-dot { transition: transform 900ms var(--ease); }
+
+.scrub-readout { display: flex; flex-wrap: wrap; gap: 1px; background: var(--rule);
+                 margin-top: 14px; border: 1px solid var(--rule-mid); }
+.scrub-readout > div { background: var(--panel); padding: 9px 14px; flex: 1 1 110px; }
+.scrub-readout .k { font-size: var(--t-micro); text-transform: uppercase;
+                    letter-spacing: 0.13em; color: var(--ink-dim); }
+.scrub-readout .v { font-size: 20px; color: var(--ink-hi); margin-top: 2px;
+                    font-variant-numeric: tabular-nums; }
+
 .draw { stroke-dasharray: var(--len); stroke-dashoffset: var(--len); }
 .draw.in { transition: stroke-dashoffset 1s var(--ease); stroke-dashoffset: 0; }
 
@@ -440,6 +466,10 @@ button.theme-toggle:focus-visible { outline: 1px solid var(--key); outline-offse
   .type { border-right: 0; max-width: none; }
   .rule::before, .scan::after { display: none; }
   .shift.in { animation: none; text-shadow: none; }
+  /* The pulse and the scrubber are the only looping things here, so under a
+     reduced-motion preference they stop entirely rather than slowing down. */
+  .pulse { animation: none; opacity: 0; }
+  .scrub { opacity: 0 !important; }
 }
 
 @media (max-width: 640px) {
@@ -515,6 +545,62 @@ SCRIPT = """
       });
     }, { threshold: 0.5 });
     document.querySelectorAll("[data-count]").forEach(function (el) { co.observe(el); });
+  }
+
+  /* The chart plays itself. A crosshair walks the points the sweep actually
+     measured, pausing on each one while the readout under the chart shows what
+     was recorded there, and the value flips colour as it crosses zero. It
+     stops on nothing that was not measured: between two points it is in
+     transit, and the readout still shows the point it is heading for rather
+     than a number interpolated out of the gap. */
+  var chart = document.querySelector("svg[data-scrub]");
+  if (chart && !reduced) {
+    var points = [];
+    try { points = JSON.parse(chart.getAttribute("data-scrub")); } catch (e) {}
+    var scrub = chart.querySelector(".scrub");
+    var line = chart.querySelector(".scrub-line");
+    var dot = chart.querySelector(".scrub-dot");
+    var pulse = chart.querySelector(".pulse");
+    var out = document.querySelector("[data-scrub-readout]");
+
+    if (points.length && scrub && line && dot) {
+      var index = 0;
+      var running = false;
+
+      function show(point) {
+        var dx = point.x - parseFloat(line.getAttribute("x1"));
+        line.setAttribute("transform", "translate(" + dx + ",0)");
+        dot.setAttribute("transform",
+          "translate(" + dx + "," + (point.y - parseFloat(dot.getAttribute("cy"))) + ")");
+        if (!out) return;
+        var sign = point.n > 0 ? "up" : "down";
+        out.querySelector("[data-f=spread]").textContent =
+          (point.s * 100).toFixed(1) + "%";
+        out.querySelector("[data-f=gross]").textContent = point.g.toFixed(2);
+        var net = out.querySelector("[data-f=net]");
+        net.textContent = (point.n > 0 ? "+" : "") + point.n.toFixed(2);
+        net.className = "v " + sign;
+        out.querySelector("[data-f=trades]").textContent = point.t;
+      }
+
+      function step() {
+        show(points[index]);
+        index = (index + 1) % points.length;
+        setTimeout(step, 1700);
+      }
+
+      var start = new IntersectionObserver(function (entries) {
+        entries.forEach(function (entry) {
+          if (!entry.isIntersecting || running) return;
+          running = true;
+          scrub.setAttribute("opacity", "1");
+          if (pulse) pulse.classList.add("on");
+          setTimeout(step, 1200);
+          start.disconnect();
+        });
+      }, { threshold: 0.25 });
+      start.observe(chart);
+    }
   }
 
   /* The clock in the status bar. A terminal that does not tick looks frozen,

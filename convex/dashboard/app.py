@@ -585,6 +585,16 @@ def _hero(summary, sensitivity: dict) -> str:
             )
             + "</div><div class='panel-body'>"
             + sensitivity_svg(points)
+            + "<div class='scrub-readout' data-scrub-readout>"
+            "<div><div class='k'>spread / leg</div>"
+            "<div class='v' data-f='spread'>--</div></div>"
+            "<div><div class='k'>gross sharpe</div>"
+            "<div class='v' data-f='gross'>--</div></div>"
+            "<div><div class='k'>net sharpe</div>"
+            "<div class='v' data-f='net'>--</div></div>"
+            "<div><div class='k'>sessions traded</div>"
+            "<div class='v' data-f='trades'>--</div></div>"
+            "</div>"
             + "<p class='note' style='margin-top:16px'><strong>Read this before "
             "quoting it.</strong> These sessions were rebuilt from trade prints, "
             "not recorded from the live book, and the spread is modelled rather "

@@ -375,8 +375,9 @@ def test_the_sensitivity_chart_marks_where_the_edge_dies():
     svg = sensitivity_svg(_sweep_points())
     assert svg.startswith("<svg")
     assert "edge dies here" in svg
-    # Every measured point is drawn, and each carries its own figures.
-    assert svg.count("<circle") == 4
+    # Every measured point is drawn, and each carries its own figures. Counted
+    # by class so the scrubber's own marker is not mistaken for a data point.
+    assert svg.count("class='pt'") == 4
     assert "net Sharpe +0.59" in svg
 
 
@@ -438,3 +439,22 @@ def test_the_two_column_field_gives_both_columns_the_same_room():
 
     block = ui.BASE[ui.BASE.index(".split {"):ui.BASE.index(".split > *")]
     assert "repeat(2, minmax(0, 1fr))" in block
+
+
+def test_every_colour_the_charts_ask_for_is_a_colour_the_palette_defines():
+    """The bug this exists to catch: charts painting black on black.
+
+    An undefined custom property in an SVG fill resolves to the initial value,
+    which is black, and on this ground that is invisible rather than wrong-
+    looking. When the palette was renamed the charts kept asking for the old
+    names and their axis labels and dots simply disappeared.
+    """
+    import re
+
+    from convex.dashboard import charts, ui
+
+    wanted = set(re.findall(r"var\((--[a-z-]+)\)", charts.__file__ and
+                            open(charts.__file__).read()))
+    defined = set(re.findall(r"^\s+(--[a-z-]+):", ui.TOKENS, re.MULTILINE))
+    missing = sorted(wanted - defined)
+    assert not missing, f"charts ask for undefined colours: {missing}"

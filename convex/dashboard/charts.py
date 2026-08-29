@@ -243,6 +243,7 @@ def sensitivity_svg(points: Sequence[dict], width: int = 940, height: int = 380)
 
     out: list[str] = [
         f"<svg viewBox='0 0 {width} {height}' width='100%' role='img' "
+        f"data-scrub='{_scrub_data(usable, sx, sy)}' "
         f"aria-label='Net Sharpe of the classified basket against the modelled "
         f"spread per leg' style='overflow:visible'>"
     ]
@@ -258,8 +259,8 @@ def sensitivity_svg(points: Sequence[dict], width: int = 940, height: int = 380)
         left, right = sx(crossing[0]), sx(crossing[1])
         out.append(
             f"<rect x='{left:.1f}' y='{pad_t}' width='{right - left:.1f}' "
-            f"height='{plot_h}' fill='var(--bad)' opacity='0.09'/>"
-            f"<text x='{(left + right) / 2:.1f}' y='{pad_t - 9}' fill='var(--bad)' "
+            f"height='{plot_h}' fill='var(--down)' opacity='0.09'/>"
+            f"<text x='{(left + right) / 2:.1f}' y='{pad_t - 9}' fill='var(--down)' "
             f"font-size='11' text-anchor='middle' font-weight='600'>edge dies here</text>"
         )
 
@@ -267,25 +268,25 @@ def sensitivity_svg(points: Sequence[dict], width: int = 940, height: int = 380)
     zero = sy(0.0)
     out.append(
         f"<line x1='{pad_l}' y1='{zero:.1f}' x2='{pad_l + plot_w}' y2='{zero:.1f}' "
-        f"stroke='var(--line-bright)' stroke-width='1'/>"
-        f"<text x='{pad_l - 10}' y='{zero + 4:.1f}' fill='var(--ink-faint)' "
+        f"stroke='var(--rule-mid)' stroke-width='1'/>"
+        f"<text x='{pad_l - 10}' y='{zero + 4:.1f}' fill='var(--ink-dim)' "
         f"font-size='11' text-anchor='end'>0.0</text>"
     )
 
     for value in (y_lo, y_hi):
         out.append(
-            f"<text x='{pad_l - 10}' y='{sy(value) + 4:.1f}' fill='var(--ink-faint)' "
+            f"<text x='{pad_l - 10}' y='{sy(value) + 4:.1f}' fill='var(--ink-dim)' "
             f"font-size='11' text-anchor='end'>{value:.1f}</text>"
         )
 
     for point in usable:
         x = sx(point["relative_spread"])
         out.append(
-            f"<text x='{x:.1f}' y='{pad_t + plot_h + 20}' fill='var(--ink-faint)' "
+            f"<text x='{x:.1f}' y='{pad_t + plot_h + 20}' fill='var(--ink-dim)' "
             f"font-size='11' text-anchor='middle'>{point['relative_spread'] * 100:g}%</text>"
         )
     out.append(
-        f"<text x='{pad_l + plot_w / 2:.1f}' y='{height - 8}' fill='var(--ink-faint)' "
+        f"<text x='{pad_l + plot_w / 2:.1f}' y='{height - 8}' fill='var(--ink-dim)' "
         f"font-size='11' text-anchor='middle'>modelled spread paid per leg</text>"
     )
 
@@ -303,17 +304,26 @@ def sensitivity_svg(points: Sequence[dict], width: int = 940, height: int = 380)
         f"<path d='{path_of(grosses)}' fill='none' stroke='var(--ink-faint)' "
         f"stroke-width='1.5' stroke-dasharray='4 4' opacity='0.75'/>"
     )
+    net_path = path_of(nets)
     out.append(
-        f"<path class='draw' style='--len:{length}' d='{path_of(nets)}' fill='none' "
-        f"stroke='var(--accent)' stroke-width='2.5' stroke-linecap='round' "
+        f"<path class='draw' style='--len:{length}' d='{net_path}' fill='none' "
+        f"stroke='var(--key)' stroke-width='2.5' stroke-linecap='round' "
         f"stroke-linejoin='round'/>"
+    )
+    # A light runs the length of the series, continuously. The path underneath
+    # is already drawn and static; this rides on top of it and carries no
+    # information, which is why it is allowed to loop when nothing else does.
+    out.append(
+        f"<path class='pulse' d='{net_path}' fill='none' stroke='var(--key-hot)' "
+        f"stroke-width='3' stroke-linecap='round' stroke-linejoin='round' "
+        f"pathLength='100' opacity='0.9'/>"
     )
 
     for point, net in zip(usable, nets):
         x, y = sx(point["relative_spread"]), sy(net)
-        colour = "var(--good)" if net > 0 else "var(--bad)"
+        colour = "var(--up)" if net > 0 else "var(--down)"
         out.append(
-            f"<g><circle cx='{x:.1f}' cy='{y:.1f}' r='4.5' fill='{colour}' "
+            f"<g><circle class='pt' cx='{x:.1f}' cy='{y:.1f}' r='4.5' fill='{colour}' "
             f"stroke='var(--panel)' stroke-width='2'>"
             f"<title>{point['relative_spread'] * 100:g}% spread — net Sharpe "
             f"{net:+.2f}, gross {point['classified']['gross_sharpe']:+.2f}, "
@@ -321,9 +331,19 @@ def sensitivity_svg(points: Sequence[dict], width: int = 940, height: int = 380)
         )
 
     out.append(
+        f"<g class='scrub' opacity='0'>"
+        f"<line class='scrub-line' x1='{pad_l}' y1='{pad_t}' x2='{pad_l}' "
+        f"y2='{pad_t + plot_h}' stroke='var(--cost)' stroke-width='1' "
+        f"stroke-dasharray='3 3'/>"
+        f"<circle class='scrub-dot' cx='{pad_l}' cy='{pad_t}' r='7' fill='none' "
+        f"stroke='var(--cost)' stroke-width='2'/>"
+        f"</g>"
+    )
+
+    out.append(
         f"<g font-size='11'>"
         f"<line x1='{pad_l}' y1='{pad_t - 6}' x2='{pad_l + 18}' y2='{pad_t - 6}' "
-        f"stroke='var(--accent)' stroke-width='2.5'/>"
+        f"stroke='var(--key)' stroke-width='2.5'/>"
         f"<text x='{pad_l + 24}' y='{pad_t - 2}' fill='var(--ink-dim)'>net</text>"
         f"<line x1='{pad_l + 60}' y1='{pad_t - 6}' x2='{pad_l + 78}' y2='{pad_t - 6}' "
         f"stroke='var(--ink-faint)' stroke-width='1.5' stroke-dasharray='4 4'/>"
@@ -332,3 +352,27 @@ def sensitivity_svg(points: Sequence[dict], width: int = 940, height: int = 380)
     )
     out.append("</svg>")
     return "".join(out)
+
+
+def _scrub_data(points: Sequence[dict], sx, sy) -> str:
+    """Where each measured point sits, and what it says.
+
+    Emitted as data so the browser walks the same coordinates the server drew,
+    rather than reimplementing the scales and drifting away from them. Only
+    measured points appear here; the scrubber stops on them and never reports a
+    value from between two of them.
+    """
+    import json
+
+    rows = [
+        {
+            "x": round(sx(p["relative_spread"]), 1),
+            "y": round(sy(p["classified"]["net_sharpe"]), 1),
+            "s": p["relative_spread"],
+            "n": p["classified"]["net_sharpe"],
+            "g": p["classified"]["gross_sharpe"],
+            "t": p["classified"]["trades"],
+        }
+        for p in points
+    ]
+    return escape(json.dumps(rows), quote=True)
