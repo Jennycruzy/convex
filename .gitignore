@@ -11,3 +11,4 @@ data/chains/
 data/models/
 *.log
 .DS_Store
+data/logs/
