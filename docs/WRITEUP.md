@@ -1,7 +1,7 @@
 # CONVEX — one-page write-up
 
 **Alpaca account ID:** _(inserted at submission — without it P&L cannot be scored)_
-**Repo:** github.com/Jennycruzy/convex · **Demo:** _(deployed URL)_
+**Repo:** github.com/Jennycruzy/convex · **Demo:** https://convex.isobars.xyz
 **Instrument:** SPY 0DTE options, paper account, entry 10:00 ET, held to the 16:00 close.
 
 ---
