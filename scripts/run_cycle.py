@@ -18,6 +18,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from convex.agent import Agent
+from convex.classifier import load_models
 from convex.config import load
 from convex.data.alpaca import AlpacaGateway
 from convex.errors import ConvexError
@@ -74,7 +75,7 @@ def main() -> int:
     ledger = Ledger(config.path_("paths.ledger"))
 
     scenarios = build_scenarios(live, config)
-    save_scenarios(scenarios, config.path_("paths.chain_archive"))
+    save_scenarios(scenarios, config.path_("paths.scenario_archive"))
     print(f"scenario set: {scenarios.describe()}")
 
     now, _ = live.clock()
@@ -84,11 +85,22 @@ def main() -> int:
         return 0
     tau = time_to_close_years(now, sessions[0].close_at)
 
+    models, metadata = load_models(config.path_("paths.models"), config)
+    if models:
+        fitted = ", ".join(sorted(str(name) for name in models))
+        print(f"classifiers loaded ({metadata.get('fitted_at', 'unknown date')}): {fitted}")
+    else:
+        print(
+            "no fitted classifiers on disk; every family falls back to the "
+            "documented volatility-regime rule, and each record says so"
+        )
+
     agent = Agent(
         gateway=DryRunGateway(live) if arguments.dry_run else live,
         config=config,
         ledger=ledger,
         scenarios=scenarios,
+        models=models,
         submission_cutoff=SUBMISSION_CUTOFF,
     )
 

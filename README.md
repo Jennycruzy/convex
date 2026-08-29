@@ -146,6 +146,7 @@ cp .env.example .env          # then fill in the paper account's keys
 .venv/bin/python -m scripts.run_cycle        # at 10:00 ET
 .venv/bin/python -m scripts.manage           # the guard, through the session
 .venv/bin/python -m scripts.manage --settle  # after the close
+.venv/bin/python -m scripts.train            # fit on the recorded chains
 .venv/bin/python -m scripts.serve            # the dashboard, on :8000
 ```
 
@@ -175,7 +176,7 @@ The suite starts the real Alpaca MCP server as a subprocess and asserts against 
 
 - **The research is SPX; this trades SPY.** Every parameter carried across is a hypothesis. Values in `config/convex.yaml` are marked `MEASURED` or `HYPOTHESIS`, and the hypotheses are not to be relied on in a live decision until `scripts/calibrate_costs.py` has replaced them.
 - **The exposure features are proxies.** They are flow/exposure estimates built from traded volume, open interest and leg Greeks — not a dealer-inventory reconstruction. Calling them GEX would overstate what they are.
-- **The classifier may not have enough history.** SPY 0DTE history through Alpaca is short relative to the burn-in a walk-forward protocol wants. When it is insufficient the agent says so explicitly and runs a documented volatility-regime rule instead, and the ledger records which one made each call.
+- **The classifier may not have enough history.** Training runs on chains the agent *recorded*, never on simulated ones, because an expired contract's book cannot be fetched back — a session that was not recorded can never be labelled honestly. Early on there will be too few sessions to clear the burn-in; `scripts/train.py` says so and fits nothing rather than presenting a model fitted on thirty rows. The agent then runs a documented volatility-regime rule, and every ledger record states which of the two made the call.
 - **Four trading sessions is not a track record.** P&L across this window is substantially variance. The reproducible parts of this project are the cost discipline, the risk checks and the receipts.
 
 ---

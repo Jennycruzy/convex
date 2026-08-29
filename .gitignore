@@ -9,6 +9,7 @@ __pycache__/
 data/ledger/
 data/chains/
 data/models/
+data/scenarios/
 *.log
 .DS_Store
 data/logs/

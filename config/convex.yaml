@@ -76,5 +76,7 @@ structures:
 paths:
   ledger: data/ledger/decisions.jsonl
   mcp_log: data/logs/alpaca-mcp.log
-  chain_archive: data/chains
+  chain_archive: data/chains        # the 10:00 snapshots training reads
+  scenario_archive: data/scenarios  # the terminal distributions used to price
+  models: data/models
   kill_switch: data/KILL

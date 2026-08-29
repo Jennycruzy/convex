@@ -28,6 +28,7 @@ from pathlib import Path
 from typing import Sequence
 from zoneinfo import ZoneInfo
 
+from convex import archive
 from convex import features as feature_engine
 from convex import rationale as rationale_layer
 from convex.classifier import RegimeRule, StructureModel
@@ -134,6 +135,36 @@ class Agent:
             self.config.str_("underlying.symbol"), expiry, low - wing, high + wing
         )
 
+    def _archive(self, chain, spot, now, expiry, cycle_id: str):
+        """Write down the chain this decision was made from.
+
+        Historical option quotes for a past 10:00 cannot be fetched back later:
+        an expired contract's book is gone. If the snapshot is not recorded now
+        then this session can never be labelled honestly, and the classifier
+        loses a training row permanently.
+
+        A day already on disk is not an error. Re-running a cycle must not
+        rewrite evidence, and it must not stop the cycle either.
+        """
+        directory = self.config.path_("paths.chain_archive")
+        try:
+            return archive.write(
+                archive.ChainSnapshot(
+                    session_date=now.date(),
+                    taken_at=now,
+                    spot=spot,
+                    expiry=expiry,
+                    entries=list(chain),
+                    cycle_id=cycle_id,
+                ),
+                directory,
+            )
+        except DataError:
+            existing = archive.path_for(directory, now.date())
+            if existing.exists():
+                return existing
+            raise
+
     def _probability(
         self, family: Family, snapshot: feature_engine.FeatureSet, variance_history: Sequence[float]
     ) -> tuple[float, str]:
@@ -202,6 +233,7 @@ class Agent:
             return CycleResult(cycle_id, True, reason)
 
         chain = self._chain(spot, expiries[0])
+        archived = self._archive(chain, spot, now, expiries[0], cycle_id)
         snapshot = feature_engine.build(
             chain, spot, now, session_close, prior_returns, family_pnl
         )
@@ -214,6 +246,7 @@ class Agent:
                     f"{expiries[0]} expiry; implied skew {snapshot.values['implied_skew']:+.5f}."
                 ),
                 features=snapshot.as_dict(),
+                extra={"chain_archive": str(archived) if archived else None},
             )
         )
 

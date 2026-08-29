@@ -25,7 +25,10 @@ more than a model fitted on thirty rows and presented as if it meant something.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Sequence
 
 import numpy as np
@@ -264,3 +267,69 @@ class RegimeRule:
         else:
             return 0.5
         return self.favoured_probability if family in favoured else self.disfavoured_probability
+
+
+def save_models(
+    models: dict[Family, StructureModel],
+    reports: Sequence[TrainingReport],
+    directory: Path,
+) -> Path:
+    """Persist the fitted families and the report that justifies trusting them.
+
+    The report is written next to the models on purpose. A model file on its
+    own says nothing about whether it should be used; the hit rate, the Brier
+    score and the calibration slope that were measured when it was fitted are
+    what decide that, and they travel with it.
+    """
+    directory.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "fitted_at": datetime.now(tz=timezone.utc).isoformat(),
+        "families": {},
+        "reports": [report.as_dict() for report in reports],
+    }
+    for family, model in models.items():
+        payload["families"][str(family)] = {
+            "feature_names": list(model.feature_names),
+            "coefficients": model.model.coef_[0].tolist(),
+            "intercept": float(model.model.intercept_[0]),
+            "mean": model.mean.tolist(),
+            "scale": model.scale.tolist(),
+            "classes": model.model.classes_.tolist(),
+        }
+    path = directory / "models.json"
+    path.write_text(json.dumps(payload, indent=2))
+    return path
+
+
+def load_models(directory: Path, config: Config) -> tuple[dict[Family, StructureModel], dict]:
+    """Rebuild the fitted families from disk, or return nothing at all.
+
+    A missing file is not an error: the agent runs the documented rule instead
+    and says so in every record. A file that exists but cannot be read *is* an
+    error, because silently falling back to the rule when a model was meant to
+    be in use would misreport which one made the call.
+    """
+    path = directory / "models.json"
+    if not path.is_file():
+        return {}, {}
+    payload = json.loads(path.read_text())
+    models: dict[Family, StructureModel] = {}
+    for name, entry in payload.get("families", {}).items():
+        family = Family(name)
+        coefficients = np.asarray(entry["coefficients"], dtype=float)
+        model = LogisticRegression(C=config.float_("classifier.l2_c"))
+        # Restore the fitted state directly. Refitting on load would need the
+        # training rows to still exist and would produce a different model on
+        # a different day, which is not what "load the model" means.
+        model.coef_ = coefficients.reshape(1, -1)
+        model.intercept_ = np.asarray([entry["intercept"]], dtype=float)
+        model.classes_ = np.asarray(entry["classes"])
+        model.n_features_in_ = coefficients.size
+        models[family] = StructureModel(
+            family=family,
+            feature_names=tuple(entry["feature_names"]),
+            model=model,
+            mean=np.asarray(entry["mean"], dtype=float),
+            scale=np.asarray(entry["scale"], dtype=float),
+        )
+    return models, payload
