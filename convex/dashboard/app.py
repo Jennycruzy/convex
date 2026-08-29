@@ -363,13 +363,16 @@ def create_app(config: Config | None = None) -> FastAPI:
             record = opened[0]
             curve, strikes = read.payoff_from_record(record)
             spot = (record.get("features") or {}).get("spot")
-            body.append(_section("position", "WHAT WAS OPENED"))
             body.append(
-                "<p>Value at expiry across underlying prices, recomputed "
-                "from the receipt. The flat tail above every strike is a broken-wing "
-                "butterfly entered for a credit: above there the structure keeps the "
-                "credit and risks nothing, which is what it buys over a ratio spread "
-                "with an open downside.</p>"
+                _section(
+                    "position",
+                    "WHAT WAS OPENED",
+                    "Value at expiry across underlying prices, recomputed from the "
+                    "receipt rather than stored. The flat tail above every strike is "
+                    "a broken-wing butterfly entered for a credit: up there it keeps "
+                    "the credit and risks nothing, which is exactly what it buys over "
+                    "a ratio spread with an open downside.",
+                )
             )
             body.append("<div class='panel reveal'>")
             body.append(
@@ -493,66 +496,103 @@ def _masthead(summary, live: bool) -> str:
 
 
 def _section(label: str, heading: str, lede: str = "") -> str:
-    """A terminal divider: the field name, then the rule out to the column edge."""
-    tail = f"<p class='lede'>{lede}</p>" if lede else ""
+    """A section head that spans the page rather than stacking down one edge.
+
+    The heading takes the left field and whatever explains it takes the right,
+    so the header row is as wide as the data underneath it and the eye is never
+    walked past an empty half to reach the next thing.
+    """
+    if not lede:
+        return (
+            f"<section class='reveal'><div class='rule'>{escape(label)}</div>"
+            f"<h2>{heading}</h2></section>"
+        )
     return (
         f"<section class='reveal'><div class='rule'>{escape(label)}</div>"
-        f"<h2>{heading}</h2>{tail}</section>"
+        "<div style='display:grid;gap:18px 40px;align-items:start;"
+        "grid-template-columns:repeat(auto-fit,minmax(280px,1fr))'>"
+        f"<h2>{heading}</h2><p style='margin:0'>{lede}</p>"
+        "</div></section>"
     )
 
 
 def _hero(summary, sensitivity: dict) -> str:
-    """The argument, before any table.
+    """The claim, with the evidence beside it rather than under it.
 
-    A reader arriving cold gets one claim and the evidence for it. The claim is
-    that the obvious 0DTE trade does not survive its own execution cost, and the
-    evidence is a curve swept across the only number that decides it.
+    Two fields across the page: the argument on the left at a readable measure,
+    the decade of research it rests on tabulated on the right. A reader who
+    only ever looks at the right-hand column still leaves knowing the finding,
+    because the finding is a pair of numbers in the last two rows.
     """
+    # The published figures this project is built on. Ten years, SPXW, net of
+    # realistic frictions. Quoted, not recomputed.
+    research = (
+        ("iron butterfly / condor", "0.77", "-0.20", True),
+        ("put ratio spread", "1.18", "0.93", False),
+        ("strangle / straddle", "0.56", "0.39", False),
+        ("top-three basket", "1.12", "0.82", False),
+    )
+    rows = "".join(
+        f"<tr><td>{escape(name)}</td>"
+        f"<td class='num'>{gross}</td>"
+        f"<td class='num {'down' if dead else 'up'}'>{net}</td></tr>"
+        for name, gross, net, dead in research
+    )
+
     parts = [
         "<section class='reveal' style='margin-top:4px'>",
         "<div class='rule'>the finding</div>",
-        "<h1><span class='type'>GROSS, IT WORKS.</span><br>"
+        "<div class='split scan'>",
+        "<div class='prose'>",
+        "<h1><span class='type shift'>GROSS, IT WORKS.</span><br>"
         "<span class='down'>NET, IT DOESN'T.</span></h1>",
-        "<p class='lede' style='margin-top:18px'>"
-        "A 2026 study tested the obvious 0DTE structures over ten years. The iron "
-        "butterfly family came back at a gross Sharpe of 0.77 and a net Sharpe of "
-        "<strong class='bad'>−0.20</strong>. The payoff shape was never the problem. "
-        "Four legs of bid–ask were."
-        "</p>",
-        "<p>CONVEX rebuilt that test on SPY, on sessions reconstructed from the "
-        "option tape, and ranks every candidate on edge <em>after</em> the spread "
-        "it would pay to get in. A structure that looks good gross and bad net is "
-        "refused, and the refusal is published with its arithmetic.</p>",
-        "</section>",
+        "<p class='lede' style='margin-top:16px'>The obvious 0DTE structures were "
+        "tested over ten years. Before costs they look like a strategy. After "
+        "costs the best-known one has a <strong class='down'>negative</strong> "
+        "Sharpe. The payoff shape was never the problem — four legs of bid-ask "
+        "were.</p>",
+        "<p>CONVEX reruns that test on SPY, over sessions rebuilt from the option "
+        "tape, and ranks every candidate on edge <em>after</em> the spread it "
+        "would pay to get in. Attractive gross and unattractive net is a "
+        "refusal, and the refusal is published with the arithmetic that "
+        "produced it.</p>",
+        "</div>",
+        "<div>",
+        "<div class='rule' style='margin-bottom:10px'>ten years, SPXW, net of frictions</div>",
+        "<table><thead><tr><th>structure</th>"
+        "<th class='num'>gross SR</th><th class='num'>net SR</th></tr></thead>"
+        f"<tbody>{rows}</tbody></table>",
+        "<p class='faint' style='font-size:var(--t-micro);margin:10px 0 0;"
+        "letter-spacing:0.08em'>THE FIRST ROW IS WHAT MOST 0DTE BOTS SHIP.</p>",
+        "</div>",
+        "</div></section>",
     ]
 
     points = (sensitivity or {}).get("points") or []
     if points:
         crossing = _crossing(points)
         parts.append(
-            "<section class='reveal'><div class='panel'>"
-            "<div class='panel-head'><div>"
-            "<h2>Where the edge dies</h2>"
-            "<p class='faint' style='margin:6px 0 0'>Net Sharpe of the classified "
-            "basket against the spread paid per leg. Every point is a full replay, "
-            "not an interpolation.</p></div>"
+            "<section class='reveal'>"
+            "<div class='rule'>where the edge dies</div>"
+            "<div class='panel scan'>"
+            "<div class='panel-head'>"
+            "<h3>net sharpe against spread paid per leg</h3>"
             + (
-                f"<div class='tile' style='min-width:200px'>"
-                f"<div class='tile-key'>Break-even spread</div>"
-                f"<div class='tile-value num'>{crossing}</div>"
-                f"<div class='tile-note'>net Sharpe crosses zero</div></div>"
+                f"<div><span class='stat-key'>BREAK-EVEN</span> "
+                f"<span class='stat-val cost'>{crossing}</span></div>"
                 if crossing
                 else ""
             )
-            + "</div>"
-            + "<div class='panel-body'>" + sensitivity_svg(points)
-            + "<p class='note' style='margin-top:18px'><strong>Read this before you "
-            "quote it.</strong> These sessions were reconstructed from trade prints, "
-            "not recorded from the live book, and the spread is modelled rather than "
-            "measured — the book for those sessions is gone. Which side of the "
-            "crossing SPY actually trades on is a measurement, and it is taken at "
-            "the open, not argued about here.</p></div>"
-            "</div></section>"
+            + "</div><div class='panel-body'>"
+            + sensitivity_svg(points)
+            + "<p class='note' style='margin-top:16px'><strong>Read this before "
+            "quoting it.</strong> These sessions were rebuilt from trade prints, "
+            "not recorded from the live book, and the spread is modelled rather "
+            "than measured — the book for those sessions is gone. Every point is "
+            "a full replay; nothing between them is drawn. Which side of the "
+            "crossing SPY actually trades on is a measurement, taken at the open, "
+            "not an argument had here.</p>"
+            "</div></div></section>"
         )
     return "".join(parts)
 

@@ -37,46 +37,53 @@ TOKENS = """
 :root {
   color-scheme: dark light;
 
-  /* Ground: near-black with a blue cast, so white text sits cool on it and
-     the amber reads warm against it. Pure black would flatten both. */
-  --ground:   #05070b;
-  --panel:    #090c12;
-  --raised:   #0d1119;
-  --sunk:     #030508;
+  /* Black, with the faintest warm cast so amber sits on it rather than
+     glowing off it. The Bloomberg ground is the reference. */
+  --ground:   #07070a;
+  --panel:    #0c0c11;
+  --raised:   #121218;
+  --sunk:     #050507;
 
-  /* Rules do the structural work, so there are three weights of them. */
-  --rule:     #161c26;
-  --rule-mid: #212a38;
-  --rule-hi:  #33405280;
+  --rule:     #1b1b24;
+  --rule-mid: #262632;
+  --rule-hi:  #3a3a4a;
 
-  --ink:      #cfd8e3;
-  --ink-hi:   #f0f4f9;
-  --ink-dim:  #7d8b9e;
-  --ink-faint:#55606f;
+  --ink:      #d6d3cc;
+  --ink-hi:   #fbf7ef;
+  --ink-dim:  #8d8a84;
+  --ink-faint:#5d5a55;
 
-  /* Semantic, and exclusive. Green is a gain. Red is a loss. Amber is what it
-     cost to trade. Cyan is the interface. Nothing borrows another's colour. */
-  --up:       #2ee6a8;
-  --down:     #ff5f56;
-  --cost:     #f0a92e;
-  --key:      #4cc9f0;
+  /* Amber is the terminal itself: field names, rules, headings, the chrome.
+     It is the colour you remember the machine by, and it is used everywhere
+     the interface speaks in its own voice rather than reporting a number. */
+  --key:      #ffb020;
+  --key-hot:  #ffd166;
 
-  --up-wash:   rgba(46, 230, 168, 0.10);
-  --down-wash: rgba(255, 95, 86, 0.10);
-  --cost-wash: rgba(240, 169, 46, 0.10);
-  --key-wash:  rgba(76, 201, 240, 0.10);
+  /* Phosphor green for a gain and a hot red for a loss, and nothing else may
+     use either — the two colours a trader reads before any text. */
+  --up:       #00e08a;
+  --down:     #ff4d5a;
 
-  /* One family, one width. */
+  /* Cost gets magenta of its own. It used to share amber with the chrome,
+     which meant the antagonist of this whole project looked like furniture.
+     It is now the one colour on the page that appears nowhere else, so a
+     cost bar is identifiable at a glance in any chart it turns up in. */
+  --cost:     #ff4fd8;
+
+  --up-wash:   rgba(0, 224, 138, 0.12);
+  --down-wash: rgba(255, 77, 90, 0.12);
+  --cost-wash: rgba(255, 79, 216, 0.12);
+  --key-wash:  rgba(255, 176, 32, 0.10);
+
   --mono: ui-monospace, "SF Mono", "JetBrains Mono", "IBM Plex Mono",
           "Roboto Mono", Menlo, Consolas, "Liberation Mono", monospace;
 
-  /* Small, because density is the point. */
   --t-micro: 10px;
   --t-small: 11px;
   --t-base:  13px;
   --t-mid:   15px;
-  --t-lg:    clamp(20px, 1.1rem + 1.2vw, 30px);
-  --t-xl:    clamp(30px, 1.4rem + 3.4vw, 62px);
+  --t-lg:    clamp(19px, 1rem + 1.1vw, 28px);
+  --t-xl:    clamp(28px, 1.2rem + 3.1vw, 56px);
 
   --row: 30px;
   --pad: 14px;
@@ -89,26 +96,26 @@ TOKENS = """
 
 :root[data-theme="light"] {
   color-scheme: light;
-  /* A paper terminal: warm ground, dark ink, the same grid. */
-  --ground:   #edeae4;
-  --panel:    #f6f4f0;
-  --raised:   #fffdfa;
-  --sunk:     #e4e0d8;
-  --rule:     #d6d1c7;
-  --rule-mid: #bdb7ab;
-  --rule-hi:  #9a9488aa;
-  --ink:      #1c1f26;
-  --ink-hi:   #05070b;
-  --ink-dim:  #5c6270;
-  --ink-faint:#8a8f9b;
-  --up:       #067a53;
-  --down:     #c62828;
-  --cost:     #a86a00;
-  --key:      #0b6a8f;
-  --up-wash:   rgba(6, 122, 83, 0.10);
-  --down-wash: rgba(198, 40, 40, 0.09);
-  --cost-wash: rgba(168, 106, 0, 0.10);
-  --key-wash:  rgba(11, 106, 143, 0.09);
+  --ground:   #eae7df;
+  --panel:    #f5f2ea;
+  --raised:   #fffdf7;
+  --sunk:     #ded9cf;
+  --rule:     #d3cec2;
+  --rule-mid: #b9b3a4;
+  --rule-hi:  #938d7e;
+  --ink:      #1b1a17;
+  --ink-hi:   #07070a;
+  --ink-dim:  #5a564e;
+  --ink-faint:#8a857b;
+  --key:      #9a5b00;
+  --key-hot:  #c47800;
+  --up:       #00734a;
+  --down:     #c0202e;
+  --cost:     #a3007f;
+  --up-wash:   rgba(0, 115, 74, 0.10);
+  --down-wash: rgba(192, 32, 46, 0.09);
+  --cost-wash: rgba(163, 0, 127, 0.10);
+  --key-wash:  rgba(154, 91, 0, 0.10);
 }
 """
 
@@ -152,7 +159,7 @@ h1, h2, h3 { margin: 0; font-weight: 600; line-height: 1.12; color: var(--ink-hi
 h1 { font-size: var(--t-xl); letter-spacing: -0.03em; }
 h2 { font-size: var(--t-lg); letter-spacing: -0.015em; }
 h3 { font-size: var(--t-mid); }
-p  { margin: 0 0 0.9em; color: var(--ink-dim); max-width: 76ch; }
+p  { margin: 0 0 0.9em; color: var(--ink-dim); }
 a  { color: var(--key); text-underline-offset: 2px; }
 code { color: var(--key); }
 strong { color: var(--ink-hi); font-weight: 600; }
@@ -294,7 +301,7 @@ tbody tr:last-child td { border-bottom: 0; }
 }
 .note strong { color: var(--ink); }
 
-.lede { font-size: var(--t-mid); color: var(--ink); max-width: 62ch; }
+.lede { font-size: var(--t-mid); color: var(--ink); }
 
 footer.foot {
   margin-top: 56px; padding: 14px 0; border-top: 1px solid var(--rule-mid);
@@ -313,6 +320,37 @@ button.theme-toggle {
 button.theme-toggle:hover { color: var(--key); background: var(--key-wash); }
 button.theme-toggle:focus-visible { outline: 1px solid var(--key); outline-offset: -1px; }
 
+/* ------------------------------------------------------------------ layout */
+
+/* The page reads across, not down one edge. A single measured column with the
+   rest of the viewport left blank is a document, and this is an instrument:
+   prose sits in one field and the figures it is talking about sit beside it,
+   so the eye never has to travel to an empty half.
+
+   The ratio is deliberate. Reading text wants a bounded measure, so the prose
+   column is the narrower of the two and the data takes the rest. */
+.split {
+  display: grid;
+  gap: 1px;
+  background: var(--rule-mid);
+  border: 1px solid var(--rule-mid);
+  grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+}
+.split > * { background: var(--panel); padding: var(--pad) 16px; min-width: 0; }
+.split.even { grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
+.split .prose { max-width: 56ch; }
+
+@media (max-width: 900px) {
+  .split { grid-template-columns: 1fr; }
+}
+
+/* A field: label above, value below, sitting in a run across the panel. */
+.readout { display: flex; flex-wrap: wrap; gap: 1px; background: var(--rule); }
+.readout > div { background: var(--panel); padding: 8px 14px; flex: 1 1 120px; }
+.readout .k { font-size: var(--t-micro); text-transform: uppercase;
+              letter-spacing: 0.16em; color: var(--ink-faint); }
+.readout .v { font-size: var(--t-mid); color: var(--ink-hi); margin-top: 2px; }
+
 /* ------------------------------------------------------------------ motion */
 
 .reveal { opacity: 0; transform: translateY(8px); }
@@ -329,6 +367,47 @@ button.theme-toggle:focus-visible { outline: 1px solid var(--key); outline-offse
 .stagger.in > *:nth-child(6) { transition-delay: 200ms; }
 .stagger.in > *:nth-child(7) { transition-delay: 240ms; }
 .stagger.in > *:nth-child(8) { transition-delay: 280ms; }
+
+/* A rule that a light travels along once as it comes into view, the way a
+   terminal draws a divider rather than simply having one. */
+.rule { position: relative; overflow: hidden; }
+.rule::before {
+  content: ""; position: absolute; inset: auto 0 0 0; height: 1px;
+  background: linear-gradient(90deg, transparent, var(--key-hot), transparent);
+  transform: translateX(-100%);
+  opacity: 0;
+}
+.rule.in::before { animation: streak 1.15s var(--ease) 120ms both; }
+@keyframes streak {
+  0%   { transform: translateX(-100%); opacity: 0; }
+  15%  { opacity: 1; }
+  85%  { opacity: 1; }
+  100% { transform: translateX(100%); opacity: 0; }
+}
+
+/* One pass of a scanline down a panel as it arrives. It runs once, never on a
+   loop: a permanently sweeping CRT line is a costume, and this is meant to
+   read as the panel being drawn. */
+.scan { position: relative; overflow: hidden; }
+.scan::after {
+  content: ""; position: absolute; left: 0; right: 0; top: -30%; height: 30%;
+  background: linear-gradient(180deg, transparent, var(--key-wash), transparent);
+  opacity: 0; pointer-events: none;
+}
+.scan.in::after { animation: scan 900ms var(--ease) both; }
+@keyframes scan {
+  0% { top: -30%; opacity: 0.9; } 100% { top: 100%; opacity: 0; }
+}
+
+/* The headline carries a single chromatic split on arrival, then settles.
+   Held to one pass and a fraction of a pixel: enough to read as a CRT
+   struggling into focus, not enough to look broken. */
+.shift.in { animation: shift 620ms steps(2, end) both; }
+@keyframes shift {
+  0%   { text-shadow: -1.5px 0 var(--cost), 1.5px 0 var(--key); }
+  60%  { text-shadow: -0.5px 0 var(--cost), 0.5px 0 var(--key); }
+  100% { text-shadow: none; }
+}
 
 .draw { stroke-dasharray: var(--len); stroke-dashoffset: var(--len); }
 .draw.in { transition: stroke-dashoffset 1s var(--ease); stroke-dashoffset: 0; }
@@ -357,6 +436,8 @@ button.theme-toggle:focus-visible { outline: 1px solid var(--key); outline-offse
   .draw { stroke-dashoffset: 0; }
   .grow { transform: none; }
   .type { border-right: 0; max-width: none; }
+  .rule::before, .scan::after { display: none; }
+  .shift.in { animation: none; text-shadow: none; }
 }
 
 @media (max-width: 640px) {
