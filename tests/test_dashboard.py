@@ -400,3 +400,41 @@ def test_the_theme_choice_is_offered_and_applied_before_paint(client):
     assert "data-theme-toggle" in page
     assert "convex-theme" in page
     assert page.index("convex-theme") < page.index("<style>")
+
+
+def test_every_animated_class_is_actually_observed():
+    """The bug this exists to catch: an effect defined but never triggered.
+
+    Each of these classes does nothing until the observer adds "in" to it. A
+    class styled in the stylesheet but missing from the observer's selector is
+    an animation that silently never runs, which is exactly what happened to
+    the travelling rule and the scanline.
+    """
+    from convex.dashboard import ui
+
+    triggered = {
+        line.split(".in")[0].strip().lstrip(".")
+        for line in ui.BASE.splitlines()
+        if ".in" in line and line.strip().startswith(".")
+    }
+    watched = ui.SCRIPT[ui.SCRIPT.index("querySelectorAll("):]
+    watched = watched[: watched.index(")")]
+    missing = sorted(
+        name for name in triggered if name and f".{name}" not in watched
+    )
+    assert not missing, f"styled for animation but never observed: {missing}"
+
+
+def test_the_page_is_set_at_a_readable_size():
+    """13px monospace is a diff view, not a page anybody reads."""
+    from convex.dashboard import ui
+
+    base = ui.TOKENS.split("--t-base:")[1].split("px")[0].strip()
+    assert float(base) >= 15
+
+
+def test_the_two_column_field_gives_both_columns_the_same_room():
+    from convex.dashboard import ui
+
+    block = ui.BASE[ui.BASE.index(".split {"):ui.BASE.index(".split > *")]
+    assert "repeat(2, minmax(0, 1fr))" in block

@@ -48,10 +48,10 @@ TOKENS = """
   --rule-mid: #262632;
   --rule-hi:  #3a3a4a;
 
-  --ink:      #d6d3cc;
+  --ink:      #e2ded6;
   --ink-hi:   #fbf7ef;
-  --ink-dim:  #8d8a84;
-  --ink-faint:#5d5a55;
+  --ink-dim:  #a8a49c;
+  --ink-faint:#7d7973;
 
   /* Amber is the terminal itself: field names, rules, headings, the chrome.
      It is the colour you remember the machine by, and it is used everywhere
@@ -78,20 +78,20 @@ TOKENS = """
   --mono: ui-monospace, "SF Mono", "JetBrains Mono", "IBM Plex Mono",
           "Roboto Mono", Menlo, Consolas, "Liberation Mono", monospace;
 
-  --t-micro: 10px;
-  --t-small: 11px;
-  --t-base:  13px;
-  --t-mid:   15px;
+  --t-micro: 11.5px;
+  --t-small: 13px;
+  --t-base:  15px;
+  --t-mid:   17px;
   --t-lg:    clamp(19px, 1rem + 1.1vw, 28px);
   --t-xl:    clamp(28px, 1.2rem + 3.1vw, 56px);
 
-  --row: 30px;
-  --pad: 14px;
+  --row: 36px;
+  --pad: 18px;
 
   --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
   --fast: 120ms;
   --mid: 280ms;
-  --slow: 620ms;
+  --slow: 900ms;
 }
 
 :root[data-theme="light"] {
@@ -131,7 +131,7 @@ body {
   color: var(--ink);
   font-family: var(--mono);
   font-size: var(--t-base);
-  line-height: 1.5;
+  line-height: 1.62;
   font-variant-numeric: tabular-nums;
   font-feature-settings: "tnum" 1, "zero" 1;
   -webkit-font-smoothing: antialiased;
@@ -175,8 +175,8 @@ em { color: var(--ink); font-style: normal; text-decoration: underline;
 .eyebrow, .tile-key, th, .badge, .stat-key {
   font-size: var(--t-micro);
   text-transform: uppercase;
-  letter-spacing: 0.16em;
-  color: var(--ink-faint);
+  letter-spacing: 0.13em;
+  color: var(--ink-dim);
   font-weight: 600;
 }
 
@@ -253,7 +253,7 @@ section { margin: 44px 0 0; scroll-margin-top: 60px; }
         transition: background var(--fast) var(--ease); }
 .tile:hover { background: var(--raised); }
 .tile-value {
-  font-size: 21px; font-weight: 600; color: var(--ink-hi);
+  font-size: 24px; font-weight: 600; color: var(--ink-hi);
   margin-top: 5px; letter-spacing: -0.02em; line-height: 1.1;
 }
 .tile-note { font-size: var(--t-micro); color: var(--ink-faint); margin-top: 3px;
@@ -334,11 +334,11 @@ button.theme-toggle:focus-visible { outline: 1px solid var(--key); outline-offse
   gap: 1px;
   background: var(--rule-mid);
   border: 1px solid var(--rule-mid);
-  grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
-.split > * { background: var(--panel); padding: var(--pad) 16px; min-width: 0; }
+.split > * { background: var(--panel); padding: 22px; min-width: 0; }
 .split.even { grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
-.split .prose { max-width: 56ch; }
+.split .prose { max-width: 62ch; }
 
 @media (max-width: 900px) {
   .split { grid-template-columns: 1fr; }
@@ -349,7 +349,7 @@ button.theme-toggle:focus-visible { outline: 1px solid var(--key); outline-offse
 .readout > div { background: var(--panel); padding: 8px 14px; flex: 1 1 120px; }
 .readout .k { font-size: var(--t-micro); text-transform: uppercase;
               letter-spacing: 0.16em; color: var(--ink-faint); }
-.readout .v { font-size: var(--t-mid); color: var(--ink-hi); margin-top: 2px; }
+.readout .v { font-size: 19px; color: var(--ink-hi); margin-top: 2px; }
 
 /* ------------------------------------------------------------------ motion */
 
@@ -372,12 +372,13 @@ button.theme-toggle:focus-visible { outline: 1px solid var(--key); outline-offse
    terminal draws a divider rather than simply having one. */
 .rule { position: relative; overflow: hidden; }
 .rule::before {
-  content: ""; position: absolute; inset: auto 0 0 0; height: 1px;
-  background: linear-gradient(90deg, transparent, var(--key-hot), transparent);
+  content: ""; position: absolute; inset: auto 0 0 0; height: 2px;
+  background: linear-gradient(90deg, transparent, var(--key-hot) 45%,
+              var(--key-hot) 55%, transparent);
   transform: translateX(-100%);
   opacity: 0;
 }
-.rule.in::before { animation: streak 1.15s var(--ease) 120ms both; }
+.rule.in::before { animation: streak 1.5s var(--ease) 200ms both; }
 @keyframes streak {
   0%   { transform: translateX(-100%); opacity: 0; }
   15%  { opacity: 1; }
@@ -390,11 +391,12 @@ button.theme-toggle:focus-visible { outline: 1px solid var(--key); outline-offse
    read as the panel being drawn. */
 .scan { position: relative; overflow: hidden; }
 .scan::after {
-  content: ""; position: absolute; left: 0; right: 0; top: -30%; height: 30%;
-  background: linear-gradient(180deg, transparent, var(--key-wash), transparent);
+  content: ""; position: absolute; left: 0; right: 0; top: -40%; height: 40%;
+  background: linear-gradient(180deg, transparent,
+              rgba(255, 176, 32, 0.22), transparent);
   opacity: 0; pointer-events: none;
 }
-.scan.in::after { animation: scan 900ms var(--ease) both; }
+.scan.in::after { animation: scan 1.4s var(--ease) 150ms both; }
 @keyframes scan {
   0% { top: -30%; opacity: 0.9; } 100% { top: 100%; opacity: 0; }
 }
@@ -421,7 +423,7 @@ button.theme-toggle:focus-visible { outline: 1px solid var(--key); outline-offse
    characters into an empty element. */
 .type { display: inline-block; overflow: hidden; white-space: nowrap;
         border-right: 0.5ch solid var(--key); }
-.type.in { animation: type 900ms steps(28, end) both, caret 900ms steps(1) 3; }
+.type.in { animation: type 1.3s steps(30, end) both, caret 1.3s steps(1) 4; }
 @keyframes type { from { max-width: 0; } to { max-width: 100%; } }
 @keyframes caret { 0%, 49% { border-color: var(--key); }
                    50%, 100% { border-color: transparent; } }
@@ -465,7 +467,9 @@ SCRIPT = """
     });
   }
 
-  var watched = document.querySelectorAll(".reveal, .stagger, .draw, .grow, .type");
+  var watched = document.querySelectorAll(
+    ".reveal, .stagger, .draw, .grow, .type, .rule, .scan, .shift"
+  );
   if (!("IntersectionObserver" in window) || reduced) {
     watched.forEach(function (el) { el.classList.add("in"); });
   } else {
