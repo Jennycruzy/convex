@@ -1,0 +1,34 @@
+# The dashboard, kept up across reboots and crashes.
+#
+# Judges load a URL, not a repository, so this has to survive the machine
+# restarting at an inconvenient hour. It binds loopback only and is published
+# by nginx, which terminates TLS.
+#
+# Install with:
+#   sudo cp deploy/convex-dashboard.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now convex-dashboard
+
+[Unit]
+Description=CONVEX decision dashboard
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/convex
+Environment=HOME=/home/ubuntu
+ExecStart=/home/ubuntu/convex/.venv/bin/python -m scripts.serve --host 127.0.0.1 --port 8000
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+# The dashboard only ever reads the ledger. It has no path to the account and
+# no credentials: the .env the agent uses is not loaded here.
+ProtectSystem=strict
+ReadWritePaths=/home/ubuntu/convex/data
+ProtectHome=read-only
+
+[Install]
+WantedBy=multi-user.target

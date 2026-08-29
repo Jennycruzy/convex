@@ -149,6 +149,11 @@ cp .env.example .env          # then fill in the paper account's keys
 .venv/bin/python -m scripts.serve            # the dashboard, on :8000
 ```
 
+Deployment artifacts are in `deploy/` — a systemd unit that keeps the dashboard up
+across reboots, bound to loopback and published by nginx which terminates TLS. The
+unit runs with `ProtectSystem=strict` and no access to the agent's credentials: the
+dashboard only ever reads the ledger.
+
 The dashboard is server-rendered with no build step and no external requests — the
 charts are inline SVG, because a deployed demo that renders a blank panel when a CDN
 is slow scores as a demo that does not work. Before the agent has run it shows an
