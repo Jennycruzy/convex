@@ -83,8 +83,19 @@ class Sample:
     family: Family
     features: dict[str, float]
     label: int
+    gross_pnl: float
+    cost: float
     net_pnl: float
     description: str
+
+    @property
+    def cost_share(self) -> float:
+        """What fraction of a positive gross result the execution took.
+
+        Above one is the finding the project is built on: a structure that made
+        money before costs and lost after them.
+        """
+        return self.cost / self.gross_pnl if self.gross_pnl > 0.0 else float("inf")
 
 
 def settlement_pnl_of(
@@ -196,6 +207,8 @@ def build_samples(
                     family=family,
                     features=dict(row.values),
                     label=1 if net > 0.0 else 0,
+                    gross_pnl=round(gross, 2),
+                    cost=round(best.estimate.cost.total, 2),
                     net_pnl=round(net, 2),
                     description=best.candidate.description,
                 )

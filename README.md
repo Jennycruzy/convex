@@ -147,6 +147,7 @@ cp .env.example .env          # then fill in the paper account's keys
 .venv/bin/python -m scripts.manage           # the guard, through the session
 .venv/bin/python -m scripts.manage --settle  # after the close
 .venv/bin/python -m scripts.train            # fit on the recorded chains
+.venv/bin/python -m scripts.backtest         # replay them, gross against net
 .venv/bin/python -m scripts.serve            # the dashboard, on :8000
 ```
 
@@ -177,6 +178,11 @@ The suite starts the real Alpaca MCP server as a subprocess and asserts against 
 - **The research is SPX; this trades SPY.** Every parameter carried across is a hypothesis. Values in `config/convex.yaml` are marked `MEASURED` or `HYPOTHESIS`, and the hypotheses are not to be relied on in a live decision until `scripts/calibrate_costs.py` has replaced them.
 - **The exposure features are proxies.** They are flow/exposure estimates built from traded volume, open interest and leg Greeks — not a dealer-inventory reconstruction. Calling them GEX would overstate what they are.
 - **The classifier may not have enough history.** Training runs on chains the agent *recorded*, never on simulated ones, because an expired contract's book cannot be fetched back — a session that was not recorded can never be labelled honestly. Early on there will be too few sessions to clear the burn-in; `scripts/train.py` says so and fits nothing rather than presenting a model fitted on thirty rows. The agent then runs a documented volatility-regime rule, and every ledger record states which of the two made the call.
+- **No Sharpe is reported below twenty observations.** A handful of trades with
+  similar results produces a ratio in the hundreds; that is a small denominator, not
+  an edge, and printing it would be the most misleading number this project could
+  publish. Over a four-session window this means no Sharpe is reported at all, which
+  is the correct outcome rather than a gap.
 - **Four trading sessions is not a track record.** P&L across this window is substantially variance. The reproducible parts of this project are the cost discipline, the risk checks and the receipts.
 
 ---
