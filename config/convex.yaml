@@ -79,4 +79,5 @@ paths:
   chain_archive: data/chains        # the 10:00 snapshots training reads
   scenario_archive: data/scenarios  # the terminal distributions used to price
   models: data/models
+  backtest_report: data/backtest.json
   kill_switch: data/KILL

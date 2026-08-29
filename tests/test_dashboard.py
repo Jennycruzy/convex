@@ -244,3 +244,96 @@ def test_a_refusal_is_featured_ahead_of_a_winning_fill(client):
     assert ordered[0]["structure"] == "straddle"
     page = session.get("/").text
     assert "cost exceeded the edge" in page
+
+
+# ------------------------------------------------------------------- the replay
+
+
+def backtest_payload():
+    return {
+        "sessions": 4,
+        "per_family": {
+            "put_bwb": {
+                "every session": {
+                    "trades": 4, "gross_sharpe": None, "net_sharpe": None,
+                    "gross_total": 210.0, "net_total": -40.0, "cost_total": 250.0,
+                },
+            },
+        },
+        "basket": {
+            "every session": {
+                "label": "basket, every session", "trades": 4,
+                "gross_sharpe": 0.77, "net_sharpe": -0.20,
+                "gross_total": 210.0, "net_total": -40.0, "cost_total": 250.0,
+            },
+        },
+    }
+
+
+@pytest.fixture
+def with_backtest(ledger_path, tmp_path):
+    """A config whose replay report exists on disk."""
+    path = tmp_path / "convex.yaml"
+    path.write_text(
+        path.read_text().replace("data/backtest.json", str(tmp_path / "bt.json"))
+    )
+    (tmp_path / "bt.json").write_text(json.dumps(backtest_payload()))
+    return TestClient(create_app(load(path))), ledger_path
+
+
+def test_a_missing_replay_is_not_an_error(client):
+    session, path = client
+    write(path, refusal())
+    assert session.get("/api/backtest").json() == {}
+    assert "Replay, gross against net" not in session.get("/").text
+
+
+def test_the_replay_shows_gross_and_net_side_by_side(with_backtest):
+    session, path = with_backtest
+    write(path, refusal())
+    page = session.get("/").text
+    assert "Replay, gross against net" in page
+    assert "0.77" in page and "-0.20" in page
+
+
+def test_an_arm_that_does_not_survive_its_costs_is_marked_as_such(with_backtest):
+    session, path = with_backtest
+    write(path, refusal())
+    page = session.get("/").text
+    # The basket has a negative net Sharpe, so its verdict must read "no".
+    assert "tag refused'>no<" in page
+
+
+def test_a_replay_over_too_few_sessions_says_so_rather_than_implying_a_result(with_backtest):
+    session, path = with_backtest
+    write(path, refusal())
+    page = session.get("/").text
+    assert "too few for a Sharpe ratio to carry meaning" in page
+
+
+def test_a_sharpe_that_could_not_be_computed_renders_as_a_dash(with_backtest):
+    from convex.dashboard.app import _sharpe
+
+    assert _sharpe(None) == "—"
+    assert _sharpe(0.77) == "0.77"
+
+
+# -------------------------------------------------------------- the last cycle
+
+
+def test_the_last_cycle_names_which_of_the_two_decided_each_family(client):
+    session, path = client
+    write(
+        path,
+        Record(action=Action.CANDIDATE_REJECTED, cycle_id="c7", structure="straddle",
+               rationale="Refused.", probability=0.4, reject_reason="classifier_confidence",
+               extra={"probability_source": "regime rule (high_variance)"}),
+        Record(action=Action.ORDER_SUBMITTED, cycle_id="c7", structure="put_bwb",
+               rationale="Entering.", probability=0.64, contracts=2,
+               extra={"probability_source": "classifier"}),
+    )
+    page = session.get("/").text
+    assert "The last cycle" in page
+    assert "regime rule (high_variance)" in page
+    assert "classifier" in page
+    assert "classifier_confidence" in page

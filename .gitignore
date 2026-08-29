@@ -13,3 +13,4 @@ data/scenarios/
 *.log
 .DS_Store
 data/logs/
+data/backtest.json

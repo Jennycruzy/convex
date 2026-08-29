@@ -147,7 +147,7 @@ cp .env.example .env          # then fill in the paper account's keys
 .venv/bin/python -m scripts.manage           # the guard, through the session
 .venv/bin/python -m scripts.manage --settle  # after the close
 .venv/bin/python -m scripts.train            # fit on the recorded chains
-.venv/bin/python -m scripts.backtest         # replay them, gross against net
+.venv/bin/python -m scripts.backtest --json  # replay them; --json feeds the dashboard
 .venv/bin/python -m scripts.serve            # the dashboard, on :8000
 ```
 

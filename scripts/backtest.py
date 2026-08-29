@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import pathlib
 import sys
 from zoneinfo import ZoneInfo
 
@@ -67,7 +68,12 @@ def show(value, places: int = 3, width: int = 8) -> str:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--json", help="also write the full report to this path")
+    parser.add_argument(
+        "--json",
+        nargs="?",
+        const="",
+        help="write the full report; with no path it goes where the dashboard reads it",
+    )
     arguments = parser.parse_args()
 
     config = load()
@@ -130,15 +136,19 @@ def main() -> int:
             verdict = "survives its costs" if arm.survives_costs else "does NOT survive its costs"
             print(f"  {arm.label}: gross {arm.gross_sharpe:.2f} → net {arm.net_sharpe:.2f}, {verdict}")
 
-    if arguments.json:
+    if arguments.json is not None:
+        destination = (
+            pathlib.Path(arguments.json) if arguments.json
+            else config.path_("paths.backtest_report")
+        )
+        destination.parent.mkdir(parents=True, exist_ok=True)
         payload = report.as_dict()
         payload["note"] = (
             "Replayed on chains recorded by the agent at 10:00 ET. Sharpe figures over "
             f"{sessions} sessions are arithmetic, not evidence."
         )
-        with open(arguments.json, "w") as handle:
-            json.dump(payload, handle, indent=2)
-        print(f"\nwrote the full report to {arguments.json}")
+        destination.write_text(json.dumps(payload, indent=2))
+        print(f"\nwrote the full report to {destination}")
     return 0
 
 
