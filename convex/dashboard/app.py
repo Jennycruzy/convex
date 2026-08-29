@@ -399,7 +399,6 @@ def create_app(config: Config | None = None) -> FastAPI:
         if replay.get("per_family") or replay.get("basket"):
             body.append(_backtest_panel(replay))
 
-        body.append("<h2>Decisions</h2>")
         body.append(_decision_log(rows))
 
         return HTMLResponse(_page("".join(body)))

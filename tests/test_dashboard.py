@@ -534,3 +534,13 @@ def test_the_receipts_heading_sits_on_the_log_it_names(client):
     assert heading < log
     # Nothing but the panel head may come between them.
     assert log - heading < 1200
+
+
+def test_the_log_is_introduced_once_and_not_twice(client):
+    """A heading left behind by the table this replaced sat above the section's
+    own heading, so the log was announced twice under two different names."""
+    session, path = client
+    write(path, Record(action=Action.STAND_DOWN, cycle_id="c1", rationale="Nothing."))
+    page = session.get("/").text
+    assert "<h2>Decisions</h2>" not in page
+    assert page.count("EVERY DECISION, INCLUDING EVERY REFUSAL") == 1
