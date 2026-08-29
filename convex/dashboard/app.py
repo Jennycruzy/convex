@@ -24,7 +24,8 @@ from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 
 from convex.config import Config, load
 from convex.dashboard import read
-from convex.dashboard.charts import payoff_svg, waterfall_svg
+from convex.dashboard import ui
+from convex.dashboard.charts import payoff_svg, sensitivity_svg, waterfall_svg
 from convex.ledger import Action
 
 STYLE = """
@@ -89,25 +90,42 @@ footer { margin-top: 44px; padding-top: 16px; border-top: 1px solid var(--line);
 """
 
 TAGS = {
-    Action.ORDER_SUBMITTED.value: ("opened", "open"),
-    Action.ORDER_FILLED.value: ("filled", "open"),
+    Action.ORDER_SUBMITTED.value: ("opened", "opened"),
+    Action.ORDER_FILLED.value: ("filled", "opened"),
     Action.CANDIDATE_REJECTED.value: ("refused", "refused"),
     Action.ORDER_REJECTED.value: ("rejected", "refused"),
-    Action.STAND_DOWN.value: ("stood down", "stand"),
-    Action.RISK_HALT.value: ("halted", "refused"),
-    Action.POSITION_CLOSED.value: ("closed", "stand"),
-    Action.SNAPSHOT.value: ("snapshot", "stand"),
-    Action.CALIBRATION.value: ("calibration", "stand"),
+    Action.STAND_DOWN.value: ("stood down", "stood"),
+    Action.RISK_HALT.value: ("halted", "halt"),
+    Action.POSITION_CLOSED.value: ("closed", "stood"),
+    Action.SNAPSHOT.value: ("snapshot", "stood"),
+    Action.CALIBRATION.value: ("calibration", "stood"),
 }
 
 
 def _tag(action: str) -> str:
-    label, css = TAGS.get(action, (action, "stand"))
-    return f'<span class="tag {css}">{escape(label)}</span>'
+    label, css = TAGS.get(action, (action, "stood"))
+    return f'<span class="badge {css}">{escape(label)}</span>'
 
 
-def _tile(key: str, value: str) -> str:
-    return f'<div class="tile"><div class="k">{escape(key)}</div><div class="v">{value}</div></div>'
+def _tile(key: str, value: str, note: str = "", count: float | None = None,
+          places: int = 0, prefix: str = "", signed: bool = False) -> str:
+    """One headline figure.
+
+    ``count`` opts the figure into the count-up: the rendered text is already
+    the final value, so a reader with JavaScript off, or one who asked for less
+    motion, sees the number rather than a zero that never animates.
+    """
+    attrs = ""
+    if count is not None:
+        attrs = (
+            f" data-count='{count}' data-places='{places}'"
+            f" data-prefix='{escape(prefix)}'" + (" data-signed" if signed else "")
+        )
+    tail = f"<div class='tile-note'>{escape(note)}</div>" if note else ""
+    return (
+        f"<div class='tile'><div class='tile-key'>{escape(key)}</div>"
+        f"<div class='tile-value num'{attrs}>{value}</div>{tail}</div>"
+    )
 
 
 def _number(value: Any, places: int = 2, dash: str = "—") -> str:
@@ -127,8 +145,9 @@ def _sharpe(value) -> str:
 def _backtest_panel(report: dict) -> str:
     """The gross-against-net table, which is the argument in one picture."""
     body = [
-        "<h2>Replay, gross against net</h2>",
-        "<p class='lede'>The same comparison the research makes, run on the chains "
+        "<section class='reveal'><p class='eyebrow'>The evidence</p>"
+        "<h2>Replay, gross against net</h2></section>",
+        "<p>The same comparison the research makes, run on the chains "
         "this agent recorded. Every row is measured twice: once before execution "
         "cost and once after. The gap between the two columns is where most 0DTE "
         "strategies quietly stop working.</p>",
@@ -136,13 +155,13 @@ def _backtest_panel(report: dict) -> str:
     sessions = int(report.get("sessions", 0))
     if sessions < 30:
         body.append(
-            f"<div class='empty'><p class='lede'>Replayed over {sessions} session(s). "
+            f"<div class='empty'><p>Replayed over {sessions} session(s). "
             "That is far too few for a Sharpe ratio to carry meaning, so none is shown "
             "below twenty observations — a handful of similar trades produces a ratio "
             "in the hundreds, which is a small denominator rather than an edge.</p></div>"
         )
 
-    body.append("<div class='panel scroll'><table><thead><tr>")
+    body.append("<div class='panel scroll-x reveal'><table><thead><tr>")
     for column in ("", "trades", "gross SR", "net SR", "gross $", "net $", "cost $", "survives"):
         body.append(f"<th>{column}</th>")
     body.append("</tr></thead><tbody>")
@@ -182,11 +201,12 @@ def _cycle_panel(cycle) -> str:
     if not verdicts:
         return ""
     body = [
-        "<h2>The last cycle</h2>",
-        "<p class='lede'>One row per structure family: the probability it was given, "
+        "<section class='reveal'><p class='eyebrow'>The last pass</p>"
+        "<h2>What it made of each family</h2></section>",
+        "<p>One row per structure family: the probability it was given, "
         "which of the two decided it, and what happened. Standing down is an outcome "
         "here, not a missing row.</p>",
-        "<div class='panel scroll'><table><thead><tr>",
+        "<div class='panel scroll-x reveal'><table><thead><tr>",
     ]
     for column in ("structure", "p", "decided by", "outcome", "lots", "reason"):
         body.append(f"<th>{column}</th>")
@@ -211,9 +231,16 @@ def create_app(config: Config | None = None) -> FastAPI:
     app = FastAPI(title="CONVEX", docs_url=None, redoc_url=None)
 
     backtest_path = settings.path_("paths.backtest_report")
+    sensitivity_path = backtest_path.parent / "sensitivity.json"
 
     def records() -> list[dict[str, Any]]:
         return read.load(ledger_path)
+
+    def sensitivity() -> dict:
+        """The spread sweep, if one has been run. Absent is not an error."""
+        if not sensitivity_path.is_file():
+            return {}
+        return json.loads(sensitivity_path.read_text())
 
     def backtest_report() -> dict:
         """The replay, if one has been run. Absent is not an error."""
@@ -238,44 +265,68 @@ def create_app(config: Config | None = None) -> FastAPI:
     def api_backtest() -> JSONResponse:
         return JSONResponse(backtest_report())
 
+    @app.get("/api/sensitivity")
+    def api_sensitivity() -> JSONResponse:
+        return JSONResponse(sensitivity())
+
     @app.get("/", response_class=HTMLResponse)
     def index(request: Request) -> HTMLResponse:
         rows = records()
         summary = read.summarise(rows)
         body: list[str] = []
 
+        body.append(_masthead(summary, summary.has_run))
+        body.append(_hero(summary, sensitivity()))
         body.append(
-            "<header class='top'><h1>CONVEX <span>0DTE SPY options, priced net of "
-            "execution cost</span></h1>"
-            "<p class='lede'>Every decision below was written to an append-only ledger "
-            "before the order existed, refusals included. Nothing on this page is "
-            "computed here; it is read back out of what the agent recorded at the "
-            "moment it decided.</p></header>"
+            "<section class='reveal'><p class='eyebrow'>The receipts</p>"
+            "<h2>Every decision, including every refusal</h2>"
+            "<p>Written to an append-only ledger before the order existed. Nothing "
+            "on this page is computed here — it is read back out of what the agent "
+            "recorded at the moment it decided.</p></section>"
         )
 
         if not summary.has_run:
             body.append(
-                "<div class='empty'><h3>No decisions recorded yet.</h3>"
-                "<p class='lede'>The agent has not completed a cycle against the paper "
+                "<div class='panel reveal'><h3>No decisions recorded yet.</h3>"
+                "<p>The agent has not completed a cycle against the paper "
                 "account, so there is nothing to show. This page deliberately renders "
                 "no sample trade and no demo data — a dashboard displaying numbers the "
                 "agent never produced would be the exact thing this project argues "
                 "against.</p>"
-                "<p class='lede'>It fills in after "
+                "<p class='faint'>It fills in after "
                 "<code>python -m scripts.preflight</code> and "
                 "<code>python -m scripts.run_cycle</code>.</p></div>"
             )
             return HTMLResponse(_page("".join(body)))
 
         realised = summary.realised_pnl
-        body.append("<div class='tiles'>")
-        body.append(_tile("realised p&l", f"{realised:+,.2f}"))
-        body.append(_tile("cycles", str(summary.cycles)))
-        body.append(_tile("opened", str(summary.orders)))
-        body.append(_tile("refused", str(summary.refusals)))
-        body.append(_tile("stood down", str(summary.stand_downs)))
-        body.append(_tile("refusal rate", f"{summary.refusal_rate:.0%}"))
-        body.append(_tile("execution cost", f"{summary.execution_cost:,.2f}"))
+        tone = "good" if realised > 0 else ("bad" if realised < 0 else "")
+        body.append("<div class='grid tiles stagger'>")
+        body.append(
+            _tile(
+                "realised p&l",
+                f"<span class='{tone}'>{realised:+,.2f}</span>",
+                f"{summary.settled_structures} settled",
+            )
+        )
+        body.append(_tile("cycles", str(summary.cycles), count=summary.cycles))
+        body.append(_tile("opened", str(summary.orders), count=summary.orders))
+        body.append(
+            _tile("refused", str(summary.refusals), "cost ate the edge",
+                  count=summary.refusals)
+        )
+        body.append(
+            _tile("stood down", str(summary.stand_downs), "a first-class outcome",
+                  count=summary.stand_downs)
+        )
+        body.append(
+            _tile("refusal rate", f"{summary.refusal_rate:.0%}",
+                  "low is not obviously good")
+        )
+        body.append(
+            _tile("execution cost", f"{summary.execution_cost:,.2f}", "paid to trade",
+                  count=summary.execution_cost, places=2)
+        )
         body.append("</div>")
 
         latest = read.waterfalls(rows)
@@ -283,20 +334,25 @@ def create_app(config: Config | None = None) -> FastAPI:
             record = latest[0]
             action = record.get("action", "")
             label = "refused" if action == Action.CANDIDATE_REJECTED.value else "opened"
-            body.append("<h2>Gross against net</h2>")
             body.append(
-                "<p class='lede'>The bar on the left is the edge before costs. Each "
+                "<section class='reveal'><p class='eyebrow'>The mechanism</p>"
+                "<h2>Gross against net</h2></section>"
+            )
+            body.append(
+                "<p>The bar on the left is the edge before costs. Each "
                 "orange bar is a component of getting in and out. The bar on the right "
                 "is what is actually left, and it is what the agent ranks on.</p>"
             )
-            body.append("<div class='panel'>")
+            body.append("<div class='panel reveal'>")
             body.append(
-                f"<h3>{escape(str(record.get('structure', 'candidate')))} · {label}</h3>"
+                "<div class='panel-head'><h3>"
+                f"{escape(str(record.get('structure', 'candidate')))}</h3>"
+                f"{_tag(action)}</div>"
             )
             body.append(waterfall_svg(record["waterfall"]))
             if record.get("rationale"):
                 body.append(
-                    f"<p class='rationale'>{escape(str(record['rationale']))}</p>"
+                    f"<p class='note' style='margin-top:16px'>{escape(str(record['rationale']))}</p>"
                 )
             body.append("</div>")
 
@@ -308,15 +364,18 @@ def create_app(config: Config | None = None) -> FastAPI:
             record = opened[0]
             curve, strikes = read.payoff_from_record(record)
             spot = (record.get("features") or {}).get("spot")
-            body.append("<h2>What was opened</h2>")
             body.append(
-                "<p class='lede'>Value at expiry across underlying prices, recomputed "
+                "<section class='reveal'><p class='eyebrow'>The position</p>"
+                "<h2>What was opened</h2></section>"
+            )
+            body.append(
+                "<p>Value at expiry across underlying prices, recomputed "
                 "from the receipt. The flat tail above every strike is a broken-wing "
                 "butterfly entered for a credit: above there the structure keeps the "
                 "credit and risks nothing, which is what it buys over a ratio spread "
                 "with an open downside.</p>"
             )
-            body.append("<div class='panel'>")
+            body.append("<div class='panel reveal'>")
             body.append(
                 f"<h3>{escape(str(record.get('structure', 'structure')))} · "
                 f"{_number(record.get('contracts'), 0)} lots · strikes "
@@ -324,7 +383,7 @@ def create_app(config: Config | None = None) -> FastAPI:
             )
             body.append(payoff_svg(curve, breakevens=strikes, spot=spot))
             body.append(
-                f"<p class='rationale'>Worst case "
+                f"<p class='note' style='margin-top:16px'>Worst case "
                 f"{_number(record.get('max_loss'))} · ES(1%) "
                 f"{_number(record.get('es_contribution'))} · entered at "
                 f"{_number(record.get('net_price'))} net.</p>"
@@ -340,7 +399,7 @@ def create_app(config: Config | None = None) -> FastAPI:
             body.append(_backtest_panel(replay))
 
         body.append("<h2>Decisions</h2>")
-        body.append("<div class='panel scroll'><table><thead><tr>")
+        body.append("<div class='panel scroll-x reveal'><table><thead><tr>")
         for column in (
             "time", "outcome", "structure", "p", "net edge",
             "max loss", "ES(1%)", "lots", "reason",
@@ -378,13 +437,122 @@ def create_app(config: Config | None = None) -> FastAPI:
 
 
 def _page(body: str) -> str:
+    """The whole document. One response, no second request for anything."""
     return (
-        "<!doctype html><html lang='en'><head><meta charset='utf-8'>"
+        "<!doctype html><html lang='en' data-theme='dark'><head>"
+        "<meta charset='utf-8'>"
         "<meta name='viewport' content='width=device-width,initial-scale=1'>"
-        "<title>CONVEX</title><style>" + STYLE + "</style></head>"
-        "<body><div class='wrap'>" + body +
-        "<footer>CONVEX · 0DTE SPY structures selected on edge net of measured "
-        "execution cost, sized against the tail, reached through Alpaca's MCP server. "
-        "Paper account. The full ledger is at <code>/api/ledger</code>.</footer>"
-        "</div></body></html>"
+        "<meta name='color-scheme' content='dark light'>"
+        "<title>CONVEX — 0DTE SPY, priced net of cost</title>"
+        "<meta name='description' content='A cost-aware, tail-budgeted 0DTE SPY "
+        "options agent. Every decision, including every refusal, with the "
+        "arithmetic that produced it.'>"
+        "<script>" + ui.HEAD_SCRIPT + "</script>"
+        "<style>" + ui.stylesheet() + "</style>"
+        "</head><body><div class='wrap'>" + body +
+        "<footer class='foot'>"
+        "<div>CONVEX · 0DTE SPY structures ranked on edge <strong>net</strong> of "
+        "measured execution cost, sized against the tail, reached entirely through "
+        "Alpaca's MCP server. Paper account.</div>"
+        "<div>The page is a view. The source is "
+        "<a href='/api/ledger'>/api/ledger</a>.</div>"
+        "</footer></div>"
+        "<script>" + ui.SCRIPT + "</script>"
+        "</body></html>"
     )
+
+
+def _masthead(summary, live: bool) -> str:
+    """Name, state, and the one sentence that says what this is."""
+    state = (
+        "<span class='pill'><span class='dot'></span>live ledger</span>"
+        if live
+        else "<span class='pill'>awaiting first cycle</span>"
+    )
+    return (
+        "<header class='top'>"
+        "<div class='brand'><div class='mark'>CONVEX</div>"
+        "<span class='eyebrow'>0DTE SPY · net of cost</span></div>"
+        f"<div style='display:flex;gap:12px;align-items:center'>{state}"
+        "<button class='theme-toggle' data-theme-toggle type='button'>Light</button>"
+        "</div></header>"
+    )
+
+
+def _hero(summary, sensitivity: dict) -> str:
+    """The argument, before any table.
+
+    A reader arriving cold gets one claim and the evidence for it. The claim is
+    that the obvious 0DTE trade does not survive its own execution cost, and the
+    evidence is a curve swept across the only number that decides it.
+    """
+    parts = [
+        "<section class='reveal' style='margin-top:8px'>",
+        "<p class='eyebrow'>The finding</p>",
+        "<h1>Gross, it works.<br>Net, it doesn't.</h1>",
+        "<p style='font-size:var(--step-1);max-width:60ch'>"
+        "A 2026 study tested the obvious 0DTE structures over ten years. The iron "
+        "butterfly family came back at a gross Sharpe of 0.77 and a net Sharpe of "
+        "<strong class='bad'>−0.20</strong>. The payoff shape was never the problem. "
+        "Four legs of bid–ask were."
+        "</p>",
+        "<p>CONVEX rebuilt that test on SPY, on sessions reconstructed from the "
+        "option tape, and ranks every candidate on edge <em>after</em> the spread "
+        "it would pay to get in. A structure that looks good gross and bad net is "
+        "refused, and the refusal is published with its arithmetic.</p>",
+        "</section>",
+    ]
+
+    points = (sensitivity or {}).get("points") or []
+    if points:
+        crossing = _crossing(points)
+        parts.append(
+            "<section class='reveal'><div class='panel'>"
+            "<div class='panel-head'><div>"
+            "<h2>Where the edge dies</h2>"
+            "<p class='faint' style='margin:6px 0 0'>Net Sharpe of the classified "
+            "basket against the spread paid per leg. Every point is a full replay, "
+            "not an interpolation.</p></div>"
+            + (
+                f"<div class='tile' style='min-width:200px'>"
+                f"<div class='tile-key'>Break-even spread</div>"
+                f"<div class='tile-value num'>{crossing}</div>"
+                f"<div class='tile-note'>net Sharpe crosses zero</div></div>"
+                if crossing
+                else ""
+            )
+            + "</div>"
+            + sensitivity_svg(points)
+            + "<p class='note' style='margin-top:18px'><strong>Read this before you "
+            "quote it.</strong> These sessions were reconstructed from trade prints, "
+            "not recorded from the live book, and the spread is modelled rather than "
+            "measured — the book for those sessions is gone. Which side of the "
+            "crossing SPY actually trades on is a measurement, and it is taken at "
+            "the open, not argued about here.</p>"
+            "</div></section>"
+        )
+    return "".join(parts)
+
+
+def _crossing(points: list) -> str:
+    """The spread at which the classified basket's net Sharpe changes sign.
+
+    Reported as the bracket the sweep actually resolves it to. Quoting a single
+    interpolated number would claim a precision the eight measured points do
+    not carry.
+    """
+    last_positive = None
+    first_negative = None
+    for point in points:
+        net = (point.get("classified") or {}).get("net_sharpe")
+        if net is None:
+            continue
+        if net > 0:
+            last_positive = point["relative_spread"]
+        elif first_negative is None and last_positive is not None:
+            first_negative = point["relative_spread"]
+    if last_positive is None:
+        return ""
+    if first_negative is None:
+        return f"beyond {last_positive:.1%}"
+    return f"{last_positive:.1%}–{first_negative:.1%}"

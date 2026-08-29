@@ -196,3 +196,139 @@ def payoff_svg(
     )
     parts.append("</svg>")
     return "".join(parts)
+
+
+def sensitivity_svg(points: Sequence[dict], width: int = 940, height: int = 380) -> str:
+    """Net and gross Sharpe of the basket against the spread paid per leg.
+
+    The one chart that answers the question the project is actually asking. The
+    gross series is drawn flat and pale because it barely moves — the strategy's
+    raw signal is not what is in doubt. The net series falls through zero, and
+    the band where it crosses is shaded, because that crossing is the whole
+    result: below it the strategy survives what it costs to trade, above it it
+    does not.
+
+    Both series draw left to right on reveal, in the direction the sweep ran.
+    """
+    usable = [
+        p for p in points
+        if (p.get("classified") or {}).get("net_sharpe") is not None
+        and (p.get("classified") or {}).get("gross_sharpe") is not None
+    ]
+    if len(usable) < 2:
+        return "<p class='faint'>The sweep has not produced enough points to draw.</p>"
+
+    pad_l, pad_r, pad_t, pad_b = 62, 24, 26, 52
+    plot_w = width - pad_l - pad_r
+    plot_h = height - pad_t - pad_b
+
+    spreads = [p["relative_spread"] for p in usable]
+    nets = [p["classified"]["net_sharpe"] for p in usable]
+    grosses = [p["classified"]["gross_sharpe"] for p in usable]
+
+    x_lo, x_hi = min(spreads), max(spreads)
+    y_lo = min(min(nets), 0.0, min(grosses))
+    y_hi = max(max(nets), max(grosses), 0.0)
+    span = (y_hi - y_lo) or 1.0
+    y_lo -= span * 0.12
+    y_hi += span * 0.12
+
+    def sx(value: float) -> float:
+        if x_hi == x_lo:
+            return pad_l
+        return pad_l + (value - x_lo) / (x_hi - x_lo) * plot_w
+
+    def sy(value: float) -> float:
+        return pad_t + (y_hi - value) / (y_hi - y_lo) * plot_h
+
+    out: list[str] = [
+        f"<svg viewBox='0 0 {width} {height}' width='100%' role='img' "
+        f"aria-label='Net Sharpe of the classified basket against the modelled "
+        f"spread per leg' style='overflow:visible'>"
+    ]
+
+    # The band the sign change happens inside, shaded before anything is drawn
+    # over it so it reads as ground rather than as another series.
+    crossing = None
+    for earlier, later in zip(usable, usable[1:]):
+        if earlier["classified"]["net_sharpe"] > 0 >= later["classified"]["net_sharpe"]:
+            crossing = (earlier["relative_spread"], later["relative_spread"])
+            break
+    if crossing:
+        left, right = sx(crossing[0]), sx(crossing[1])
+        out.append(
+            f"<rect x='{left:.1f}' y='{pad_t}' width='{right - left:.1f}' "
+            f"height='{plot_h}' fill='var(--bad)' opacity='0.09'/>"
+            f"<text x='{(left + right) / 2:.1f}' y='{pad_t - 9}' fill='var(--bad)' "
+            f"font-size='11' text-anchor='middle' font-weight='600'>edge dies here</text>"
+        )
+
+    # Zero. The only gridline that means anything on this chart.
+    zero = sy(0.0)
+    out.append(
+        f"<line x1='{pad_l}' y1='{zero:.1f}' x2='{pad_l + plot_w}' y2='{zero:.1f}' "
+        f"stroke='var(--line-bright)' stroke-width='1'/>"
+        f"<text x='{pad_l - 10}' y='{zero + 4:.1f}' fill='var(--ink-faint)' "
+        f"font-size='11' text-anchor='end'>0.0</text>"
+    )
+
+    for value in (y_lo, y_hi):
+        out.append(
+            f"<text x='{pad_l - 10}' y='{sy(value) + 4:.1f}' fill='var(--ink-faint)' "
+            f"font-size='11' text-anchor='end'>{value:.1f}</text>"
+        )
+
+    for point in usable:
+        x = sx(point["relative_spread"])
+        out.append(
+            f"<text x='{x:.1f}' y='{pad_t + plot_h + 20}' fill='var(--ink-faint)' "
+            f"font-size='11' text-anchor='middle'>{point['relative_spread'] * 100:g}%</text>"
+        )
+    out.append(
+        f"<text x='{pad_l + plot_w / 2:.1f}' y='{height - 8}' fill='var(--ink-faint)' "
+        f"font-size='11' text-anchor='middle'>modelled spread paid per leg</text>"
+    )
+
+    def path_of(values: Sequence[float]) -> str:
+        return " ".join(
+            ("M" if index == 0 else "L") + f"{sx(s):.1f},{sy(v):.1f}"
+            for index, (s, v) in enumerate(zip(spreads, values))
+        )
+
+    # A rough path length, only so the draw-on animation has something to
+    # count down. Exactness does not matter; overshooting is invisible.
+    length = int(plot_w * 1.6)
+
+    out.append(
+        f"<path d='{path_of(grosses)}' fill='none' stroke='var(--ink-faint)' "
+        f"stroke-width='1.5' stroke-dasharray='4 4' opacity='0.75'/>"
+    )
+    out.append(
+        f"<path class='draw' style='--len:{length}' d='{path_of(nets)}' fill='none' "
+        f"stroke='var(--accent)' stroke-width='2.5' stroke-linecap='round' "
+        f"stroke-linejoin='round'/>"
+    )
+
+    for point, net in zip(usable, nets):
+        x, y = sx(point["relative_spread"]), sy(net)
+        colour = "var(--good)" if net > 0 else "var(--bad)"
+        out.append(
+            f"<g><circle cx='{x:.1f}' cy='{y:.1f}' r='4.5' fill='{colour}' "
+            f"stroke='var(--panel)' stroke-width='2'>"
+            f"<title>{point['relative_spread'] * 100:g}% spread — net Sharpe "
+            f"{net:+.2f}, gross {point['classified']['gross_sharpe']:+.2f}, "
+            f"{point['classified']['trades']} trades</title></circle></g>"
+        )
+
+    out.append(
+        f"<g font-size='11'>"
+        f"<line x1='{pad_l}' y1='{pad_t - 6}' x2='{pad_l + 18}' y2='{pad_t - 6}' "
+        f"stroke='var(--accent)' stroke-width='2.5'/>"
+        f"<text x='{pad_l + 24}' y='{pad_t - 2}' fill='var(--ink-dim)'>net</text>"
+        f"<line x1='{pad_l + 60}' y1='{pad_t - 6}' x2='{pad_l + 78}' y2='{pad_t - 6}' "
+        f"stroke='var(--ink-faint)' stroke-width='1.5' stroke-dasharray='4 4'/>"
+        f"<text x='{pad_l + 84}' y='{pad_t - 2}' fill='var(--ink-dim)'>gross</text>"
+        f"</g>"
+    )
+    out.append("</svg>")
+    return "".join(out)

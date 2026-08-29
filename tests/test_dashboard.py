@@ -333,7 +333,70 @@ def test_the_last_cycle_names_which_of_the_two_decided_each_family(client):
                extra={"probability_source": "classifier"}),
     )
     page = session.get("/").text
-    assert "The last cycle" in page
+    assert "What it made of each family" in page
     assert "regime rule (high_variance)" in page
     assert "classifier" in page
     assert "classifier_confidence" in page
+
+
+# ------------------------------------------------------- the sensitivity chart
+
+
+def _sweep_points():
+    """A sweep whose net Sharpe changes sign between two and three per cent."""
+    return [
+        {"relative_spread": 0.01, "classified": {"net_sharpe": 0.59, "gross_sharpe": 1.28, "trades": 118}},
+        {"relative_spread": 0.02, "classified": {"net_sharpe": 0.58, "gross_sharpe": 1.60, "trades": 94}},
+        {"relative_spread": 0.03, "classified": {"net_sharpe": -0.10, "gross_sharpe": 1.45, "trades": 80}},
+        {"relative_spread": 0.05, "classified": {"net_sharpe": -0.68, "gross_sharpe": 1.35, "trades": 79}},
+    ]
+
+
+def test_the_crossing_is_reported_as_the_bracket_the_sweep_resolves():
+    """Quoting one interpolated number would claim precision eight points lack."""
+    from convex.dashboard.app import _crossing
+
+    assert _crossing(_sweep_points()) == "2.0%-3.0%".replace("-", "–")
+
+
+def test_a_sweep_that_never_turns_negative_says_so_rather_than_inventing_a_crossing():
+    from convex.dashboard.app import _crossing
+
+    points = [
+        {"relative_spread": 0.01, "classified": {"net_sharpe": 0.8, "gross_sharpe": 1.2, "trades": 10}},
+        {"relative_spread": 0.02, "classified": {"net_sharpe": 0.4, "gross_sharpe": 1.1, "trades": 10}},
+    ]
+    assert _crossing(points).startswith("beyond")
+
+
+def test_the_sensitivity_chart_marks_where_the_edge_dies():
+    from convex.dashboard.charts import sensitivity_svg
+
+    svg = sensitivity_svg(_sweep_points())
+    assert svg.startswith("<svg")
+    assert "edge dies here" in svg
+    # Every measured point is drawn, and each carries its own figures.
+    assert svg.count("<circle") == 4
+    assert "net Sharpe +0.59" in svg
+
+
+def test_the_chart_refuses_to_draw_a_curve_from_one_point():
+    from convex.dashboard.charts import sensitivity_svg
+
+    assert "not produced enough points" in sensitivity_svg(_sweep_points()[:1])
+
+
+def test_the_page_carries_its_own_styles_and_makes_no_external_request(client):
+    page = client[0].get("/").text
+    assert "<style>" in page and "cubic-bezier" in page
+    for scheme in ("http://", "https://", "//cdn"):
+        assert f'src="{scheme}' not in page and f"src='{scheme}" not in page
+    # Motion is opt-out, and the opt-out is honoured rather than declared.
+    assert "prefers-reduced-motion" in page
+
+
+def test_the_theme_choice_is_offered_and_applied_before_paint(client):
+    page = client[0].get("/").text
+    assert "data-theme-toggle" in page
+    assert "convex-theme" in page
+    assert page.index("convex-theme") < page.index("<style>")
