@@ -12,11 +12,24 @@ The last of those is the number that matters, because a cost of forty dollars
 means one thing on a structure risking five hundred and another on one risking
 eighty.
 
+By default it measures and prints. With --write it also puts the one figure it
+can honestly measure into config/convex.yaml and clears that key from the
+blocking provenance list, which is the step that would otherwise be a hand edit
+minutes before an entry.
+
+Only `liquidity.max_relative_spread` is written, because it is the only one of
+the checked inputs a chain snapshot can settle. Slippage is a fill against the
+mid it was sent at, both fees arrive on the account's activity record, and the
+pin band needs a real close watched. Those stay conservative bounds until a
+trade exists to measure them from.
+
 Run it with:  .venv/bin/python -m scripts.calibrate_costs
+              .venv/bin/python -m scripts.calibrate_costs --write
 """
 
 from __future__ import annotations
 
+import argparse
 import statistics
 import sys
 from datetime import datetime, timezone
@@ -25,22 +38,39 @@ from pathlib import Path
 from convex.config import load
 from convex.costs import CostModel
 from convex.data.alpaca import AlpacaGateway
-from convex.errors import ConvexError, UndefinedRiskError
+from convex.errors import ConfigError, ConvexError, UndefinedRiskError
+from convex.measured import apply_measurement, write_atomically
 from convex.ledger import Action, Ledger, Record, new_cycle_id
 from convex.payoff import risk_profile
 from convex.structures import build_candidates
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
+# The one checked input a chain snapshot can settle on its own.
+MEASURED_KEY = "liquidity.max_relative_spread"
+
+# Below this many quoted legs a p90 is three contracts and a rounding error, so
+# the run reports and refuses rather than writing a threshold off it.
+MINIMUM_LEGS = 40
+
 
 def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--write",
+        action="store_true",
+        help="put the measured liquidity threshold into config/convex.yaml and "
+        "clear it from provenance.hypothesis",
+    )
+    arguments = parser.parse_args()
+
     config = load()
     symbol = config.str_("underlying.symbol")
     gateway = AlpacaGateway(config)
     ledger = Ledger(config.path_("paths.ledger"))
     model = CostModel.from_config(config)
 
-    now, _ = gateway.clock()
+    now, market_open = gateway.clock()
     expiries = gateway.expirations(symbol, now.date())
     expiry = expiries[0]
     spot, _ = gateway.spot(symbol)
@@ -98,6 +128,10 @@ def main() -> int:
         )
 
     measured = {
+        # Whether anyone was quoting when this was taken. A spread measured off
+        # a shut book is a real number about nothing, and the record has to say
+        # so: this note and the ledger entry are published on the dashboard.
+        "market_open": market_open,
         "spot": round(spot, 2),
         "expiry": expiry.isoformat(),
         "contracts": len(chain),
@@ -116,14 +150,82 @@ def main() -> int:
                 f"Measured SPY 0DTE execution cost on the {expiry} expiry with the "
                 f"underlying at {spot:,.2f}: the median leg costs "
                 f"{measured['leg_half_spread_median']:.3f} per share to cross."
+                + ("" if market_open else " Taken with the market closed, so these "
+                   "are the spreads of a book nobody is quoting and no threshold "
+                   "was written from them.")
             ),
             outcome=measured,
         )
     )
     _write_note(measured)
     print(f"\nwritten to the ledger and to docs/calibration-{datetime.now(timezone.utc):%Y-%m-%d}.md")
-    print("suggested configuration, to be applied by hand after reading it:")
-    print(f"  liquidity.max_relative_spread: {_quantile(leg_relative, 0.9):.2f}")
+
+    threshold = _quantile(leg_relative, 0.9)
+    if not arguments.write:
+        print(f"\nmeasured  {MEASURED_KEY}: {threshold:.4f}")
+        print("re-run with --write to put it in the configuration")
+        return 0
+
+    return _apply(config, ledger, threshold, len(chain), market_open, measured)
+
+
+def _apply(config, ledger, threshold: float, legs: int, market_open: bool, measured: dict) -> int:
+    """Write the threshold, or refuse and say why, having changed nothing.
+
+    Both refusals are about the same thing. A relative spread read off a shut
+    market is the width of a book nobody is maintaining, and one read off a
+    handful of legs is not a distribution. Either would be baked into a live
+    threshold and then trusted as a measurement.
+    """
+    if not market_open:
+        print(
+            "\nrefusing to write: the market is closed, so these are the spreads of "
+            "a book nobody is quoting. Run this during a session."
+        )
+        return 2
+    if legs < MINIMUM_LEGS:
+        print(
+            f"\nrefusing to write: {legs} quoted legs is too few for a p90 to mean "
+            f"anything (wanted {MINIMUM_LEGS})."
+        )
+        return 2
+
+    before = config.float_(MEASURED_KEY)
+    path = config.path
+    try:
+        updated = apply_measurement(
+            path.read_text(),
+            MEASURED_KEY,
+            threshold,
+            datetime.now(timezone.utc).date(),
+            "scripts/calibrate_costs.py",
+        )
+    except ConfigError as error:
+        print(f"\nrefusing to write: {error}")
+        return 2
+
+    write_atomically(path, updated)
+    ledger.append(
+        Record(
+            action=Action.CALIBRATION,
+            cycle_id=new_cycle_id(),
+            rationale=(
+                f"Measured {MEASURED_KEY} at {threshold:.4f} from {legs} quoted legs "
+                f"and replaced the standing value of {before:.4f}. The key is cleared "
+                "from provenance.hypothesis, so the calibration check no longer "
+                "stands the session down for it."
+            ),
+            outcome={
+                "key": MEASURED_KEY,
+                "before": before,
+                "after": round(threshold, 6),
+                "legs": legs,
+                "measurement": measured,
+            },
+        )
+    )
+    print(f"\n{MEASURED_KEY}: {before:.4f} -> {threshold:.4f}, written to {path}")
+    print("cleared from provenance.hypothesis; the session will price on it")
     return 0
 
 
@@ -142,6 +244,14 @@ def _write_note(measured: dict) -> None:
         "",
         f"Underlying at {measured['spot']:,.2f}, expiry {measured['expiry']}, "
         f"{measured['contracts']} contracts in the band.",
+        "",
+        (
+            "Taken during a session."
+            if measured.get("market_open")
+            else "**Taken with the market closed.** These are the spreads of a book "
+            "nobody is quoting. Nothing was written into the configuration from "
+            "them and nothing should be."
+        ),
         "",
         "## Per leg",
         "",
