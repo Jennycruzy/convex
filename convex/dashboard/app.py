@@ -203,6 +203,37 @@ def create_app(config: Config | None = None) -> FastAPI:
                 )
             body.append("</div>")
 
+        opened = [
+            record for record in reversed(rows)
+            if record.get("action") == Action.ORDER_SUBMITTED.value and record.get("legs")
+        ]
+        if opened:
+            record = opened[0]
+            curve, strikes = read.payoff_from_record(record)
+            spot = (record.get("features") or {}).get("spot")
+            body.append("<h2>What was opened</h2>")
+            body.append(
+                "<p class='lede'>Value at expiry across underlying prices, recomputed "
+                "from the receipt. The flat tail above every strike is a broken-wing "
+                "butterfly entered for a credit: above there the structure keeps the "
+                "credit and risks nothing, which is what it buys over a ratio spread "
+                "with an open downside.</p>"
+            )
+            body.append("<div class='panel'>")
+            body.append(
+                f"<h3>{escape(str(record.get('structure', 'structure')))} · "
+                f"{_number(record.get('contracts'), 0)} lots · strikes "
+                f"{escape(', '.join(f'{strike:g}' for strike in strikes))}</h3>"
+            )
+            body.append(payoff_svg(curve, breakevens=strikes, spot=spot))
+            body.append(
+                f"<p class='rationale'>Worst case "
+                f"{_number(record.get('max_loss'))} · ES(1%) "
+                f"{_number(record.get('es_contribution'))} · entered at "
+                f"{_number(record.get('net_price'))} net.</p>"
+            )
+            body.append("</div>")
+
         body.append("<h2>Decisions</h2>")
         body.append("<div class='panel scroll'><table><thead><tr>")
         for column in (

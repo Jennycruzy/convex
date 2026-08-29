@@ -190,10 +190,14 @@ def waterfalls(records: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
     that is hard to find anywhere else.
     """
     rows = [record for record in records if record.get("waterfall")]
+    # Refusals sort ahead of everything, then by recency. A candidate with real
+    # gross edge that did not survive its own half-spread is the finding this
+    # project is built on, and a page that leads with a winning fill instead
+    # buries it.
     rows.sort(
         key=lambda record: (
-            record.get("ts", ""),
             record.get("action") == Action.CANDIDATE_REJECTED.value,
+            record.get("ts", ""),
         ),
         reverse=True,
     )
@@ -215,3 +219,56 @@ def format_stamp(value: str | None) -> str:
         return datetime.fromisoformat(value).strftime("%Y-%m-%d %H:%M:%S %Z").strip()
     except ValueError:
         return value
+
+
+def payoff_from_record(
+    record: dict[str, Any], points: int = 161
+) -> tuple[list[tuple[float, float]], tuple[float, ...]]:
+    """Rebuild a structure's expiry payoff from its ledger line.
+
+    The receipt carries every leg's right, strike and signed ratio plus the net
+    entry price, which is all the payoff at expiry depends on. Nothing is
+    fetched and nothing is modelled: this is the same arithmetic the risk check
+    ran before the order was sent, recomputed from the record so a reader can
+    see the shape the agent was looking at.
+
+    Returns the curve and the strikes, so the caller can mark the kinks.
+    """
+    legs = record.get("legs") or []
+    if not legs:
+        raise ValueError("this record carries no legs to draw")
+    net_entry = float(record.get("net_price", 0.0))
+    multiplier = 100
+
+    strikes: list[float] = []
+    parsed: list[tuple[str, float, int]] = []
+    for leg in legs:
+        for key in ("right", "strike", "ratio"):
+            if key not in leg:
+                raise ValueError(f"a recorded leg is missing {key!r}")
+        right = str(leg["right"]).lower()
+        strike = float(leg["strike"])
+        parsed.append((right, strike, int(leg["ratio"])))
+        strikes.append(strike)
+
+    # A window wide enough to show the flat tails on both sides of the wings,
+    # which for a broken-wing butterfly is the whole point of the diagram.
+    low, high = min(strikes), max(strikes)
+    pad = max(high - low, high * 0.02)
+    grid = {low - pad + (high - low + 2 * pad) * index / (points - 1) for index in range(points)}
+    grid |= set(strikes)
+
+    def intrinsic(right: str, strike: float, price: float) -> float:
+        return max(price - strike, 0.0) if right == "call" else max(strike - price, 0.0)
+
+    curve = [
+        (
+            price,
+            (sum(ratio * intrinsic(right, strike, price) for right, strike, ratio in parsed)
+             - net_entry)
+            * multiplier
+            * max(int(record.get("contracts") or 1), 1),
+        )
+        for price in sorted(grid)
+    ]
+    return curve, tuple(sorted(set(strikes)))

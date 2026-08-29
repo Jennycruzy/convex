@@ -146,7 +146,13 @@ cp .env.example .env          # then fill in the paper account's keys
 .venv/bin/python -m scripts.run_cycle        # at 10:00 ET
 .venv/bin/python -m scripts.manage           # the guard, through the session
 .venv/bin/python -m scripts.manage --settle  # after the close
+.venv/bin/python -m scripts.serve            # the dashboard, on :8000
 ```
+
+The dashboard is server-rendered with no build step and no external requests — the
+charts are inline SVG, because a deployed demo that renders a blank panel when a CDN
+is slow scores as a demo that does not work. Before the agent has run it shows an
+empty page saying so; there is no sample trade and no demo mode.
 
 `--dry-run` is not a simulation. Every read goes to the real API; only the write is withheld, so it exercises the same chain, the same account and the same checks as a live cycle.
 

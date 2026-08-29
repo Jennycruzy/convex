@@ -183,3 +183,64 @@ def test_the_payoff_diagram_keeps_a_broken_wing_credit_tail_above_zero():
 def test_a_payoff_diagram_needs_more_than_one_point():
     with pytest.raises(ValueError, match="at least two points"):
         payoff_svg([(650.0, 0.0)])
+
+
+# --------------------------------------------------------------- payoff wiring
+
+
+def opened_bwb():
+    return Record(
+        action=Action.ORDER_SUBMITTED,
+        cycle_id="c9",
+        structure="put_bwb",
+        rationale="Entering 2 lots.",
+        probability=0.64,
+        contracts=2,
+        net_price=-0.20,
+        max_loss=960.0,
+        es_contribution=620.0,
+        legs=[
+            {"symbol": "SPY260831P00650000", "right": "put", "strike": 650.0, "ratio": 1},
+            {"symbol": "SPY260831P00645000", "right": "put", "strike": 645.0, "ratio": -2},
+            {"symbol": "SPY260831P00635000", "right": "put", "strike": 635.0, "ratio": 1},
+        ],
+        extra={"waterfall": {"gross_edge": 40.0, "half_spread": -6.0, "slippage": -4.0,
+                             "fees": -1.0, "exit_reserve": -3.0, "net_edge": 26.0}},
+    )
+
+
+def test_the_payoff_is_rebuilt_from_the_receipt_not_refetched():
+    curve, strikes = read.payoff_from_record(opened_bwb().__dict__ | {"legs": opened_bwb().legs})
+    assert strikes == (635.0, 645.0, 650.0)
+    # Two lots of a 0.20 credit: +40 above every strike, bounded at -960 below.
+    assert max(value for _, value in curve) > 0
+    assert min(value for _, value in curve) == pytest.approx(-960.0)
+    assert [value for price, value in curve if price >= 660][0] == pytest.approx(40.0)
+
+
+def test_a_record_with_no_legs_cannot_be_drawn():
+    with pytest.raises(ValueError, match="no legs"):
+        read.payoff_from_record({"net_price": 1.0})
+
+
+def test_a_leg_missing_its_strike_raises_rather_than_drawing_a_wrong_shape():
+    with pytest.raises(ValueError, match="missing 'strike'"):
+        read.payoff_from_record({"legs": [{"right": "put", "ratio": 1}], "net_price": 1.0})
+
+
+def test_an_opened_structure_gets_a_payoff_panel_on_the_page(client):
+    session, path = client
+    write(path, opened_bwb())
+    page = session.get("/").text
+    assert "What was opened" in page
+    assert "635, 645, 650" in page
+    assert "pay-line" in page
+
+
+def test_a_refusal_is_featured_ahead_of_a_winning_fill(client):
+    session, path = client
+    write(path, refusal("straddle"), opened_bwb())
+    ordered = read.waterfalls(read.load(path))
+    assert ordered[0]["structure"] == "straddle"
+    page = session.get("/").text
+    assert "cost exceeded the edge" in page
