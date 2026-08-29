@@ -70,9 +70,28 @@ OWN_RESULT_FEATURES: tuple[str, ...] = ("pnl_lag1", "pnl_mean5", "pnl_std5")
 _MINIMUM_PRIOR_SESSIONS = 5
 
 
+# What a session rebuilt from the tape cannot supply, because the book that
+# produced it is gone: the open-interest exposure proxy and the three liquidity
+# terms. See convex/reconstruct.py. A model fitted on rebuilt history is fitted
+# without these and says so; at 10:00 the live row carries them anyway and the
+# model simply does not read them.
+UNRECONSTRUCTABLE_FEATURES: tuple[str, ...] = (
+    "gex_balance",
+    "liq_half_spread",
+    "liq_relative_spread",
+    "liq_tightness",
+)
+
+
 def feature_names_for(family: Family) -> tuple[str, ...]:
     """The exact predictor row one family's model is fitted on."""
     return SHARED_FEATURES + tuple(f"{family}_{name}" for name in OWN_RESULT_FEATURES)
+
+
+def reconstructed_feature_names_for(family: Family) -> tuple[str, ...]:
+    """The same row, less the features a rebuilt session cannot honestly fill."""
+    shared = tuple(n for n in SHARED_FEATURES if n not in UNRECONSTRUCTABLE_FEATURES)
+    return shared + tuple(f"{family}_{name}" for name in OWN_RESULT_FEATURES)
 
 
 @dataclass(frozen=True)
@@ -115,13 +134,20 @@ def build_samples(
     scenarios: ScenarioSet,
     config: Config,
     rank,
+    build_features=None,
 ) -> list[Sample]:
     """Walk the recorded sessions in order and label each family's choice.
 
     ``rank`` is the live cycle's own ranking function, passed in rather than
     reimplemented, so the candidate labelled here is provably the candidate the
     agent would have opened.
+
+    ``build_features`` defaults to the live feature engine. A rebuilt session
+    has no Greeks and no book, so the backfill passes its own builder rather
+    than fabricating them; the lagged per-family results still accumulate here,
+    in session order, which is why this is a function and not a table of rows.
     """
+    build_features = build_features or feature_engine.build
     if not snapshots:
         return []
     cost_model = CostModel.from_config(config)
@@ -169,7 +195,7 @@ def build_samples(
             # moments. It is dropped and counted, never padded with zeros.
             continue
 
-        row = feature_engine.build(
+        row = build_features(
             snapshot.entries,
             snapshot.spot,
             snapshot.taken_at,

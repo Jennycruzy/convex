@@ -45,9 +45,19 @@ from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from typing import Iterable, Sequence
 
+import numpy as np
+
 from convex.config import Config
 from convex.errors import DataError
-from convex.instruments import OptionContract, Right
+from convex.features import (
+    FeatureSet,
+    _strike_widths,
+    lagged_results,
+    realised_moments,
+    time_to_close_years,
+)
+from convex.archive import ChainSnapshot
+from convex.instruments import ChainEntry, OptionContract, Quote, Right
 
 # Solver bounds. A 0DTE implied volatility outside this range is not a
 # volatility, it is a bad print, and it is dropped rather than clamped.
@@ -161,6 +171,7 @@ class ReconstructedSession:
     spot_at_close: float
     entries: tuple[ReconstructedEntry, ...]
     strikes_requested: int
+    printed: int = 0
     reconstructed: bool = True
 
     @property
@@ -176,12 +187,268 @@ class ReconstructedSession:
             "session": self.session_date.isoformat(),
             "spot_at_entry": round(self.spot_at_entry, 2),
             "spot_at_close": round(self.spot_at_close, 2),
+            "contracts_printed": self.printed,
             "contracts_priced": len(self.entries),
+            "dropped_as_inconsistent": max(self.printed - len(self.entries), 0),
             "contracts_requested": self.strikes_requested,
             "coverage": round(self.coverage, 3),
             "implied_vols_solved": len(solved),
             "reconstructed": True,
         }
+
+
+def arbitrage_free(
+    entries: Sequence[ReconstructedEntry], spot: float
+) -> list[ReconstructedEntry]:
+    """Drop prints that could not have been on the screen together.
+
+    A live chain is one instant of one book, so it satisfies the static
+    no-arbitrage conditions by construction. A rebuilt chain does not: each
+    strike's print happened at its own moment inside the entry minute, at its
+    own side of its own spread, and stitching them into a column produces a
+    surface that is merely close to a real one. Priced naively, the gaps show
+    up as structures that appear to profit at every expiry price — which the
+    sizing code correctly refuses to size, because that is what an arbitrage
+    looks like and it is not one.
+
+    So the surface is cleaned to the conditions a real chain would satisfy:
+
+      bounds       a price at least its intrinsic value and below the ceiling
+                   the underlying (calls) or the strike (puts) imposes
+      monotonicity calls cheapen as the strike rises, puts richen
+      convexity    the butterfly around each interior strike is non-negative
+
+    Points that violate are removed, not adjusted. Nudging a print into line
+    would invent a trade nobody made; dropping it only narrows the ladder, and
+    the coverage figure already reports how much of the ladder survived.
+    """
+    kept: list[ReconstructedEntry] = []
+    for right in (Right.CALL, Right.PUT):
+        rows = sorted(
+            (e for e in entries if e.contract.right is right),
+            key=lambda e: e.contract.strike,
+        )
+        bounded = []
+        for row in rows:
+            strike = row.contract.strike
+            intrinsic = max(0.0, (spot - strike) if right is Right.CALL else (strike - spot))
+            ceiling = spot if right is Right.CALL else strike
+            if intrinsic - 1e-6 <= row.entry_price < ceiling:
+                bounded.append(row)
+
+        # Monotone in strike: a call is worth less as the strike rises, a put
+        # more. The first print of a violating pair is kept and the second
+        # dropped, so the ladder stays anchored nearest the money where the
+        # tape is thickest.
+        monotone: list[ReconstructedEntry] = []
+        for row in bounded if right is Right.CALL else list(reversed(bounded)):
+            if monotone and row.entry_price > monotone[-1].entry_price + 1e-9:
+                continue
+            monotone.append(row)
+        if right is Right.PUT:
+            monotone.reverse()
+
+        # Convex in strike. A strike whose price sits above the chord joining
+        # its neighbours makes the butterfly around it negative, so it is the
+        # print out of line and it goes. Removing one point can expose another,
+        # so this repeats until the side is clean.
+        convex = monotone
+        changed = True
+        while changed and len(convex) >= 3:
+            changed = False
+            for index in range(1, len(convex) - 1):
+                left, middle, right_row = convex[index - 1], convex[index], convex[index + 1]
+                span = right_row.contract.strike - left.contract.strike
+                if span <= 0:
+                    continue
+                weight = (right_row.contract.strike - middle.contract.strike) / span
+                chord = weight * left.entry_price + (1.0 - weight) * right_row.entry_price
+                if middle.entry_price > chord + 1e-6:
+                    convex = convex[:index] + convex[index + 1 :]
+                    changed = True
+                    break
+        kept.extend(convex)
+    return kept
+
+
+def _otm(
+    entries: Iterable[ReconstructedEntry], spot: float, right: Right
+) -> list[ReconstructedEntry]:
+    if right is Right.CALL:
+        rows = [e for e in entries if e.contract.right is right and e.contract.strike >= spot]
+    else:
+        rows = [e for e in entries if e.contract.right is right and e.contract.strike <= spot]
+    return sorted(rows, key=lambda e: e.contract.strike)
+
+
+def integrated_variance(
+    rows: Sequence[ReconstructedEntry], spot: float, tau: float
+) -> float:
+    """VIX-style integrated variance from one side, priced off prints.
+
+    The live engine integrates the mid of each out-of-the-money option. There
+    is no mid to integrate here, so the print stands in for it. That is a real
+    substitution and not a neutral one — a print sits somewhere inside the
+    spread rather than at its centre, so this is noisier than the live figure
+    and can be biased on a strike that only traded once. It is recorded as a
+    reconstructed feature for exactly that reason.
+    """
+    if tau <= 0.0:
+        raise DataError(f"time to expiry must be positive, found {tau}")
+    strikes = [row.contract.strike for row in rows]
+    widths = _strike_widths(strikes)
+    total = 0.0
+    for row, width in zip(rows, widths):
+        total += (width / row.contract.strike**2) * row.entry_price
+    return (2.0 / tau) * total
+
+
+def smile_slope(rows: Sequence[ReconstructedEntry], spot: float) -> float:
+    """Least-squares slope of solved volatility against log-moneyness.
+
+    Only contracts whose print actually solved contribute. A strike that
+    printed at parity has no volatility and is left out rather than entered
+    as a zero, which would drag the slope toward the money.
+    """
+    usable = [r for r in rows if r.implied_volatility is not None]
+    if len(usable) < 3:
+        raise DataError(
+            f"smile slope needs three solved volatilities, found {len(usable)}"
+        )
+    x = np.array([math.log(r.contract.strike / spot) for r in usable])
+    y = np.array([r.implied_volatility for r in usable], dtype=float)
+    slope, _ = np.polyfit(x, y, 1)
+    return float(slope)
+
+
+# What a rebuilt session can supply. The liquidity and open-interest families
+# are absent rather than zeroed: the book that produced them is gone, and a
+# zero would be a measurement claim nobody made.
+RECONSTRUCTED_FEATURES: tuple[str, ...] = (
+    "iv_total",
+    "iv_up",
+    "iv_dn",
+    "implied_skew",
+    "slope_up",
+    "slope_dn",
+    "realised_variance",
+    "realised_skew",
+    "realised_return",
+)
+
+
+def features(
+    session: ReconstructedSession,
+    entry_at: datetime,
+    close_at: datetime,
+    prior_returns: Sequence[float],
+    family_pnl: dict[str, Sequence[float]],
+) -> FeatureSet:
+    """The predictor row a rebuilt session can honestly supply."""
+    tau = time_to_close_years(entry_at, close_at)
+    calls = _otm(session.entries, session.spot_at_entry, Right.CALL)
+    puts = _otm(session.entries, session.spot_at_entry, Right.PUT)
+    if len(calls) < 2 or len(puts) < 2:
+        raise DataError(
+            f"{session.session_date}: rebuilt chain has {len(calls)} out-of-the-money "
+            f"calls and {len(puts)} puts; integrated variance needs two on each side"
+        )
+
+    variance_up = integrated_variance(calls, session.spot_at_entry, tau)
+    variance_dn = integrated_variance(puts, session.spot_at_entry, tau)
+    values: dict[str, float] = {
+        "iv_total": variance_up + variance_dn,
+        "iv_up": variance_up,
+        "iv_dn": variance_dn,
+        "implied_skew": variance_up - variance_dn,
+        "slope_up": smile_slope(calls, session.spot_at_entry),
+        "slope_dn": smile_slope(puts, session.spot_at_entry),
+    }
+    values.update(realised_moments(prior_returns))
+    for family, history in sorted(family_pnl.items()):
+        for name, value in lagged_results(history).items():
+            values[f"{family}_{name}"] = value
+
+    return FeatureSet(
+        taken_at=entry_at,
+        spot=session.spot_at_entry,
+        time_to_close_years=tau,
+        values=values,
+    )
+
+
+def as_chain_entries(
+    session: ReconstructedSession,
+    entry_at: datetime,
+    relative_spread: float,
+) -> list[ChainEntry]:
+    """Dress a rebuilt session as a chain, with the spread modelled explicitly.
+
+    The candidate builders, the cost model and the edge calculation read quotes
+    and nothing else — no Greeks, no open interest — so a rebuilt session can be
+    run through the *same* ranking the live cycle uses rather than a parallel
+    one written for the backtest. That matters: a label attached to a candidate
+    some other ranking chose is a label for a decision nobody makes.
+
+    The quote is modelled, not observed. The print becomes the mid and the
+    spread is the one measured on today's live chain, applied uniformly. Two
+    consequences are worth naming. A uniform spread understates the cost of the
+    illiquid wings, which are the strikes a broken-wing structure actually
+    reaches for. And the depth is unknown, so sizes are zero here and any check
+    that reads depth is meaningless on a rebuilt session.
+
+    Greeks and open interest stay None rather than becoming zero, so anything
+    downstream that needs them raises instead of quietly reading a fabrication.
+    """
+    if relative_spread < 0.0:
+        raise DataError(f"modelled relative spread must not be negative: {relative_spread}")
+    rows: list[ChainEntry] = []
+    for entry in session.entries:
+        half = 0.5 * relative_spread * entry.entry_price
+        bid = entry.entry_price - half
+        if bid <= 0.0:
+            # A contract whose modelled bid is not positive could not have been
+            # sold at any price this model believes in, so it is dropped rather
+            # than floored to a tick nobody quoted.
+            continue
+        rows.append(
+            ChainEntry(
+                contract=entry.contract,
+                quote=Quote(
+                    symbol=entry.contract.symbol,
+                    bid=bid,
+                    ask=entry.entry_price + half,
+                    bid_size=0,
+                    ask_size=0,
+                    timestamp=entry_at,
+                ),
+                greeks=None,
+                open_interest=None,
+                volume=entry.volume,
+            )
+        )
+    return rows
+
+
+def as_snapshot(
+    session: ReconstructedSession,
+    entry_at: datetime,
+    relative_spread: float,
+) -> ChainSnapshot:
+    """A rebuilt session in the shape the labeller already understands.
+
+    Built in memory and never written to the chain archive: the archive is the
+    record of what CONVEX actually saw, and a rebuilt session did not happen to
+    it. Keeping the shape lets training.build_samples label these sessions with
+    the live ranking rather than a second implementation written for history.
+    """
+    return ChainSnapshot(
+        session_date=session.session_date,
+        taken_at=entry_at,
+        spot=session.spot_at_entry,
+        expiry=session.expiry,
+        entries=as_chain_entries(session, entry_at, relative_spread),
+    )
 
 
 def strike_ladder(spot: float, config: Config) -> list[float]:
@@ -267,11 +534,16 @@ def build(
             )
             break
 
+    # Prints from different moments do not form an arbitrage-free surface on
+    # their own, and one that is not arbitrage-free cannot be priced.
+    consistent = arbitrage_free(entries, spot_at_entry)
+
     return ReconstructedSession(
         session_date=session_date,
         expiry=session_date,
         spot_at_entry=spot_at_entry,
         spot_at_close=spot_at_close,
-        entries=tuple(entries),
+        entries=tuple(consistent),
         strikes_requested=len(contracts),
+        printed=len(entries),
     )
