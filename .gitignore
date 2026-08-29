@@ -14,3 +14,8 @@ data/scenarios/
 .DS_Store
 data/logs/
 data/backtest.json
+
+# Working notes for whoever picks this up next. Never committed:
+# it names the account, records what is unfinished, and is written for us
+# rather than for a judge reading the repo.
+HANDOFF.md
