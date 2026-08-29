@@ -67,7 +67,7 @@ def refusal(structure="put_bwb", net=-6.0):
 def test_an_empty_ledger_renders_an_empty_page_and_says_so(client):
     session, _ = client
     page = session.get("/").text
-    assert "No decisions recorded yet" in page
+    assert "no decisions recorded yet" in page.lower()
     assert "no sample trade and no demo data" in page
 
 
@@ -131,7 +131,7 @@ def test_a_refusal_appears_on_the_page_with_its_waterfall(client):
     session, path = client
     write(path, refusal())
     page = session.get("/").text
-    assert "Gross against net" in page
+    assert "gross against net" in page.lower()
     assert "cost exceeded the edge" in page
     assert "put_bwb" in page
     assert "refused" in page
@@ -232,7 +232,7 @@ def test_an_opened_structure_gets_a_payoff_panel_on_the_page(client):
     session, path = client
     write(path, opened_bwb())
     page = session.get("/").text
-    assert "What was opened" in page
+    assert "what was opened" in page.lower()
     assert "635, 645, 650" in page
     assert "pay-line" in page
 
@@ -292,7 +292,7 @@ def test_the_replay_shows_gross_and_net_side_by_side(with_backtest):
     session, path = with_backtest
     write(path, refusal())
     page = session.get("/").text
-    assert "Replay, gross against net" in page
+    assert "replay, gross against net" in page.lower()
     assert "0.77" in page and "-0.20" in page
 
 
@@ -333,7 +333,7 @@ def test_the_last_cycle_names_which_of_the_two_decided_each_family(client):
                extra={"probability_source": "classifier"}),
     )
     page = session.get("/").text
-    assert "What it made of each family" in page
+    assert "what it made of each family" in page.lower()
     assert "regime rule (high_variance)" in page
     assert "classifier" in page
     assert "classifier_confidence" in page

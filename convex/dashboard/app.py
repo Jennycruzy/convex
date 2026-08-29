@@ -145,8 +145,7 @@ def _sharpe(value) -> str:
 def _backtest_panel(report: dict) -> str:
     """The gross-against-net table, which is the argument in one picture."""
     body = [
-        "<section class='reveal'><p class='eyebrow'>The evidence</p>"
-        "<h2>Replay, gross against net</h2></section>",
+        _section("evidence", "REPLAY, GROSS AGAINST NET"),
         "<p>The same comparison the research makes, run on the chains "
         "this agent recorded. Every row is measured twice: once before execution "
         "cost and once after. The gap between the two columns is where most 0DTE "
@@ -201,8 +200,7 @@ def _cycle_panel(cycle) -> str:
     if not verdicts:
         return ""
     body = [
-        "<section class='reveal'><p class='eyebrow'>The last pass</p>"
-        "<h2>What it made of each family</h2></section>",
+        _section("last pass", "WHAT IT MADE OF EACH FAMILY"),
         "<p>One row per structure family: the probability it was given, "
         "which of the two decided it, and what happened. Standing down is an outcome "
         "here, not a missing row.</p>",
@@ -278,16 +276,19 @@ def create_app(config: Config | None = None) -> FastAPI:
         body.append(_masthead(summary, summary.has_run))
         body.append(_hero(summary, sensitivity()))
         body.append(
-            "<section class='reveal'><p class='eyebrow'>The receipts</p>"
-            "<h2>Every decision, including every refusal</h2>"
-            "<p>Written to an append-only ledger before the order existed. Nothing "
-            "on this page is computed here — it is read back out of what the agent "
-            "recorded at the moment it decided.</p></section>"
+            _section(
+                "receipts",
+                "EVERY DECISION, INCLUDING EVERY REFUSAL",
+                "Written to an append-only ledger before the order existed. Nothing "
+                "on this page is computed here — it is read back out of what the "
+                "agent recorded at the moment it decided.",
+            )
         )
 
         if not summary.has_run:
             body.append(
-                "<div class='panel reveal'><h3>No decisions recorded yet.</h3>"
+                "<div class='panel reveal'><div class='panel-body'>"
+                "<h3>NO DECISIONS RECORDED YET</h3>"
                 "<p>The agent has not completed a cycle against the paper "
                 "account, so there is nothing to show. This page deliberately renders "
                 "no sample trade and no demo data — a dashboard displaying numbers the "
@@ -295,7 +296,7 @@ def create_app(config: Config | None = None) -> FastAPI:
                 "against.</p>"
                 "<p class='faint'>It fills in after "
                 "<code>python -m scripts.preflight</code> and "
-                "<code>python -m scripts.run_cycle</code>.</p></div>"
+                "<code>python -m scripts.run_cycle</code>.</p></div></div>"
             )
             return HTMLResponse(_page("".join(body)))
 
@@ -334,10 +335,7 @@ def create_app(config: Config | None = None) -> FastAPI:
             record = latest[0]
             action = record.get("action", "")
             label = "refused" if action == Action.CANDIDATE_REJECTED.value else "opened"
-            body.append(
-                "<section class='reveal'><p class='eyebrow'>The mechanism</p>"
-                "<h2>Gross against net</h2></section>"
-            )
+            body.append(_section("mechanism", "GROSS AGAINST NET"))
             body.append(
                 "<p>The bar on the left is the edge before costs. Each "
                 "orange bar is a component of getting in and out. The bar on the right "
@@ -349,12 +347,13 @@ def create_app(config: Config | None = None) -> FastAPI:
                 f"{escape(str(record.get('structure', 'candidate')))}</h3>"
                 f"{_tag(action)}</div>"
             )
+            body.append("<div class='panel-body'>")
             body.append(waterfall_svg(record["waterfall"]))
             if record.get("rationale"):
                 body.append(
                     f"<p class='note' style='margin-top:16px'>{escape(str(record['rationale']))}</p>"
                 )
-            body.append("</div>")
+            body.append("</div></div>")
 
         opened = [
             record for record in reversed(rows)
@@ -364,10 +363,7 @@ def create_app(config: Config | None = None) -> FastAPI:
             record = opened[0]
             curve, strikes = read.payoff_from_record(record)
             spot = (record.get("features") or {}).get("spot")
-            body.append(
-                "<section class='reveal'><p class='eyebrow'>The position</p>"
-                "<h2>What was opened</h2></section>"
-            )
+            body.append(_section("position", "WHAT WAS OPENED"))
             body.append(
                 "<p>Value at expiry across underlying prices, recomputed "
                 "from the receipt. The flat tail above every strike is a broken-wing "
@@ -381,6 +377,7 @@ def create_app(config: Config | None = None) -> FastAPI:
                 f"{_number(record.get('contracts'), 0)} lots · strikes "
                 f"{escape(', '.join(f'{strike:g}' for strike in strikes))}</h3>"
             )
+            body.append("<div class='panel-body'>")
             body.append(payoff_svg(curve, breakevens=strikes, spot=spot))
             body.append(
                 f"<p class='note' style='margin-top:16px'>Worst case "
@@ -388,7 +385,7 @@ def create_app(config: Config | None = None) -> FastAPI:
                 f"{_number(record.get('es_contribution'))} · entered at "
                 f"{_number(record.get('net_price'))} net.</p>"
             )
-            body.append("</div>")
+            body.append("</div></div>")
 
         cycles = read.cycles(rows)
         if cycles:
@@ -463,19 +460,44 @@ def _page(body: str) -> str:
 
 
 def _masthead(summary, live: bool) -> str:
-    """Name, state, and the one sentence that says what this is."""
-    state = (
-        "<span class='pill'><span class='dot'></span>live ledger</span>"
-        if live
-        else "<span class='pill'>awaiting first cycle</span>"
-    )
+    """The status bar.
+
+    A terminal tells you the state of the world before it tells you anything
+    else, so this is the first row on the page and it stays there while you
+    scroll: what this is, whether the ledger is live, what it has done, and the
+    exchange clock — which is the only thing on the page that moves without a
+    reload, and is there because a terminal that does not tick looks frozen.
+    """
+    led = "led live" if live else "led off"
+    state = "LEDGER LIVE" if live else "NO CYCLE YET"
     return (
-        "<header class='top'>"
-        "<div class='brand'><div class='mark'>CONVEX</div>"
-        "<span class='eyebrow'>0DTE SPY · net of cost</span></div>"
-        f"<div style='display:flex;gap:12px;align-items:center'>{state}"
-        "<button class='theme-toggle' data-theme-toggle type='button'>Light</button>"
-        "</div></header>"
+        "<div class='statusbar'>"
+        "<div class='mark'>CON<b>V</b>EX</div>"
+        f"<div><span class='{led}'></span><span class='stat-val'>{state}</span></div>"
+        "<div><span class='stat-key'>UND</span>"
+        "<span class='stat-val'>SPY 0DTE</span></div>"
+        "<div><span class='stat-key'>ACCT</span>"
+        "<span class='stat-val'>PAPER</span></div>"
+        f"<div><span class='stat-key'>CYC</span>"
+        f"<span class='stat-val'>{summary.cycles}</span></div>"
+        f"<div><span class='stat-key'>REF</span>"
+        f"<span class='stat-val down'>{summary.refusals}</span></div>"
+        f"<div><span class='stat-key'>OPN</span>"
+        f"<span class='stat-val up'>{summary.orders}</span></div>"
+        "<div class='spacer'></div>"
+        "<div><span class='stat-key'>CLK</span>"
+        "<span class='stat-val' data-clock>--:--:--</span></div>"
+        "<button class='theme-toggle' data-theme-toggle type='button'>LIGHT</button>"
+        "</div>"
+    )
+
+
+def _section(label: str, heading: str, lede: str = "") -> str:
+    """A terminal divider: the field name, then the rule out to the column edge."""
+    tail = f"<p class='lede'>{lede}</p>" if lede else ""
+    return (
+        f"<section class='reveal'><div class='rule'>{escape(label)}</div>"
+        f"<h2>{heading}</h2>{tail}</section>"
     )
 
 
@@ -487,10 +509,11 @@ def _hero(summary, sensitivity: dict) -> str:
     evidence is a curve swept across the only number that decides it.
     """
     parts = [
-        "<section class='reveal' style='margin-top:8px'>",
-        "<p class='eyebrow'>The finding</p>",
-        "<h1>Gross, it works.<br>Net, it doesn't.</h1>",
-        "<p style='font-size:var(--step-1);max-width:60ch'>"
+        "<section class='reveal' style='margin-top:4px'>",
+        "<div class='rule'>the finding</div>",
+        "<h1><span class='type'>GROSS, IT WORKS.</span><br>"
+        "<span class='down'>NET, IT DOESN'T.</span></h1>",
+        "<p class='lede' style='margin-top:18px'>"
         "A 2026 study tested the obvious 0DTE structures over ten years. The iron "
         "butterfly family came back at a gross Sharpe of 0.77 and a net Sharpe of "
         "<strong class='bad'>−0.20</strong>. The payoff shape was never the problem. "
@@ -522,13 +545,13 @@ def _hero(summary, sensitivity: dict) -> str:
                 else ""
             )
             + "</div>"
-            + sensitivity_svg(points)
+            + "<div class='panel-body'>" + sensitivity_svg(points)
             + "<p class='note' style='margin-top:18px'><strong>Read this before you "
             "quote it.</strong> These sessions were reconstructed from trade prints, "
             "not recorded from the live book, and the spread is modelled rather than "
             "measured — the book for those sessions is gone. Which side of the "
             "crossing SPY actually trades on is a measurement, and it is taken at "
-            "the open, not argued about here.</p>"
+            "the open, not argued about here.</p></div>"
             "</div></section>"
         )
     return "".join(parts)

@@ -1,25 +1,32 @@
-"""The dashboard's design system: tokens, type, motion.
+"""The dashboard's design system: palette, type, motion.
 
-Kept apart from app.py so that the page can be read as structure and this can
-be read as craft. There is no build step, no framework and no external request
-— the stylesheet and the behaviour ship inside the response, which is also why
-the page survives being loaded from a phone on a conference wifi.
+This is a trading terminal, and it is built like one rather than like a web
+page with financial data on it. Four decisions carry the whole thing.
 
-Three decisions run through all of it.
+**It is set in monospace, all of it.** Not the numbers only — the labels, the
+headings, the prose. A terminal reads in one width because every character
+occupying the same cell is what lets a column of figures be scanned rather than
+read, and because the moment a proportional face appears next to a fixed one
+the whole surface stops looking like an instrument and starts looking like a
+website about an instrument.
 
-**Numbers are the subject.** Every figure is set in tabular numerals so columns
-align down the page and a changing value does not make the row twitch. Money
-and Sharpe ratios get the same treatment as a trading terminal gives them:
-monospaced digits, tight tracking, the sign carried in colour as well as glyph.
+**Nothing is rounded.** Panels meet at hairlines. A terminal is a grid of cells
+and the rules between them are the structure, so borders do the work that
+shadows and corner radii would do elsewhere, and they cost nothing to paint.
 
-**Motion explains rather than decorates.** Things enter in the order they were
-computed, a bar grows from the baseline it is measured against, a curve draws
-left to right the way it was swept. Nothing loops, nothing bounces, and every
-transition is cancelled outright under prefers-reduced-motion — a trader with
-vestibular sensitivity should get the same page, still.
+**The palette is semantic before it is decorative.** Green is a gain and red is
+a loss and nothing else is allowed to use them. Amber belongs to execution
+cost, because cost is the antagonist of this entire project and it should be
+the same colour every time it appears — in the waterfall, in a table, in a
+refusal. That leaves cyan for the interface itself: keys, rules, the things you
+can click. Four colours, each meaning exactly one thing.
 
-**The dark theme is the default** because that is where this kind of instrument
-lives, but the light theme is a real design and not an inversion.
+**Density is the point.** Terminals are dense because a trader wants the whole
+state at once. Rows are tight, padding is small, the type is small, and the
+information is allowed to be close together.
+
+The light theme is a paper terminal — warm ground, dark ink, the same grid —
+rather than the dark theme with the colours flipped.
 """
 
 from __future__ import annotations
@@ -30,71 +37,78 @@ TOKENS = """
 :root {
   color-scheme: dark light;
 
-  /* Ground up: the page is layered, not flat. Each surface sits a measured
-     step above the one behind it so depth reads without a single shadow. */
-  --ground:  #07090d;
-  --sunk:    #0a0d13;
-  --panel:   #0e1219;
-  --raised:  #141924;
-  --line:    #1e2530;
-  --line-bright: #2a3342;
+  /* Ground: near-black with a blue cast, so white text sits cool on it and
+     the amber reads warm against it. Pure black would flatten both. */
+  --ground:   #05070b;
+  --panel:    #090c12;
+  --raised:   #0d1119;
+  --sunk:     #030508;
 
-  --ink:     #e8edf5;
-  --ink-dim: #9aa7ba;
-  --ink-faint: #61708a;
+  /* Rules do the structural work, so there are three weights of them. */
+  --rule:     #161c26;
+  --rule-mid: #212a38;
+  --rule-hi:  #33405280;
 
-  /* One accent, used sparingly enough that it still means something. */
-  --accent:  #4c8dff;
-  --accent-dim: #1d3a6b;
-  --accent-glow: rgba(76, 141, 255, 0.16);
+  --ink:      #cfd8e3;
+  --ink-hi:   #f0f4f9;
+  --ink-dim:  #7d8b9e;
+  --ink-faint:#55606f;
 
-  --good:    #35d0a5;
-  --bad:     #ff6b6b;
-  --cost:    #f5a524;
-  --neutral: #7c8ba1;
+  /* Semantic, and exclusive. Green is a gain. Red is a loss. Amber is what it
+     cost to trade. Cyan is the interface. Nothing borrows another's colour. */
+  --up:       #2ee6a8;
+  --down:     #ff5f56;
+  --cost:     #f0a92e;
+  --key:      #4cc9f0;
 
-  --font: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Inter,
-          Roboto, "Helvetica Neue", sans-serif;
-  --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+  --up-wash:   rgba(46, 230, 168, 0.10);
+  --down-wash: rgba(255, 95, 86, 0.10);
+  --cost-wash: rgba(240, 169, 46, 0.10);
+  --key-wash:  rgba(76, 201, 240, 0.10);
 
-  /* A scale, not a pile of arbitrary pixel values. */
-  --step--1: clamp(0.75rem, 0.73rem + 0.1vw, 0.8rem);
-  --step-0:  clamp(0.875rem, 0.85rem + 0.12vw, 0.94rem);
-  --step-1:  clamp(1.05rem, 0.99rem + 0.3vw, 1.25rem);
-  --step-2:  clamp(1.4rem, 1.25rem + 0.75vw, 1.9rem);
-  --step-3:  clamp(2rem, 1.6rem + 2vw, 3.2rem);
-  --step-4:  clamp(2.6rem, 1.9rem + 3.4vw, 4.6rem);
+  /* One family, one width. */
+  --mono: ui-monospace, "SF Mono", "JetBrains Mono", "IBM Plex Mono",
+          "Roboto Mono", Menlo, Consolas, "Liberation Mono", monospace;
 
-  --gap: 20px;
-  --radius: 10px;
-  --radius-sm: 6px;
+  /* Small, because density is the point. */
+  --t-micro: 10px;
+  --t-small: 11px;
+  --t-base:  13px;
+  --t-mid:   15px;
+  --t-lg:    clamp(20px, 1.1rem + 1.2vw, 30px);
+  --t-xl:    clamp(30px, 1.4rem + 3.4vw, 62px);
 
-  /* Motion. One easing curve for entrances, one for anything the pointer
-     drives, and durations short enough that nobody waits on the interface. */
-  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
-  --ease-io:  cubic-bezier(0.65, 0, 0.35, 1);
-  --fast: 140ms;
-  --mid: 320ms;
-  --slow: 720ms;
+  --row: 30px;
+  --pad: 14px;
+
+  --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --fast: 120ms;
+  --mid: 280ms;
+  --slow: 620ms;
 }
 
 :root[data-theme="light"] {
   color-scheme: light;
-  --ground:  #f2f4f8;
-  --sunk:    #e9edf3;
-  --panel:   #ffffff;
-  --raised:  #f7f9fc;
-  --line:    #dde3ec;
-  --line-bright: #c6cfdd;
-  --ink:     #0d1219;
-  --ink-dim: #4d5a6d;
-  --ink-faint: #7d8a9e;
-  --accent:  #1f6feb;
-  --accent-glow: rgba(31, 111, 235, 0.1);
-  --good:    #0a7f68;
-  --bad:     #c0392b;
-  --cost:    #b9741a;
-  --neutral: #64748b;
+  /* A paper terminal: warm ground, dark ink, the same grid. */
+  --ground:   #edeae4;
+  --panel:    #f6f4f0;
+  --raised:   #fffdfa;
+  --sunk:     #e4e0d8;
+  --rule:     #d6d1c7;
+  --rule-mid: #bdb7ab;
+  --rule-hi:  #9a9488aa;
+  --ink:      #1c1f26;
+  --ink-hi:   #05070b;
+  --ink-dim:  #5c6270;
+  --ink-faint:#8a8f9b;
+  --up:       #067a53;
+  --down:     #c62828;
+  --cost:     #a86a00;
+  --key:      #0b6a8f;
+  --up-wash:   rgba(6, 122, 83, 0.10);
+  --down-wash: rgba(198, 40, 40, 0.09);
+  --cost-wash: rgba(168, 106, 0, 0.10);
+  --key-wash:  rgba(11, 106, 143, 0.09);
 }
 """
 
@@ -102,206 +116,236 @@ TOKENS = """
 
 BASE = """
 *, *::before, *::after { box-sizing: border-box; }
-
 html { -webkit-text-size-adjust: 100%; }
 
 body {
   margin: 0;
   background: var(--ground);
   color: var(--ink);
-  font-family: var(--font);
-  font-size: var(--step-0);
-  line-height: 1.6;
+  font-family: var(--mono);
+  font-size: var(--t-base);
+  line-height: 1.5;
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1, "zero" 1;
   -webkit-font-smoothing: antialiased;
-  text-rendering: optimizeLegibility;
 }
 
-/* The ground is not a flat fill. A single very soft wash behind the masthead
-   gives the page a horizon without costing a request or a repaint. */
+/* The faintest grid, fixed behind everything. It is barely visible and that
+   is the intent: it gives the ground a texture that reads as ruled paper
+   rather than as a flat fill, and it costs one paint. */
 body::before {
   content: "";
-  position: fixed;
-  inset: 0 0 auto 0;
-  height: 60vh;
-  background:
-    radial-gradient(90ch 40vh at 18% -10%, var(--accent-glow), transparent 70%);
+  position: fixed; inset: 0;
+  background-image:
+    linear-gradient(to right, var(--rule) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--rule) 1px, transparent 1px);
+  background-size: 96px 96px;
+  opacity: 0.35;
   pointer-events: none;
   z-index: 0;
 }
 
-.wrap { position: relative; z-index: 1; max-width: 1180px;
-        margin: 0 auto; padding: 0 24px 96px; }
+.wrap { position: relative; z-index: 1; max-width: 1280px;
+        margin: 0 auto; padding: 0 18px 80px; }
 
-h1, h2, h3 { margin: 0; font-weight: 600; letter-spacing: -0.022em; line-height: 1.15; }
-h1 { font-size: var(--step-4); letter-spacing: -0.04em; }
-h2 { font-size: var(--step-2); }
-h3 { font-size: var(--step-1); }
-p { margin: 0 0 1em; color: var(--ink-dim); max-width: 68ch; }
-a { color: var(--accent); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+h1, h2, h3 { margin: 0; font-weight: 600; line-height: 1.12; color: var(--ink-hi); }
+h1 { font-size: var(--t-xl); letter-spacing: -0.03em; }
+h2 { font-size: var(--t-lg); letter-spacing: -0.015em; }
+h3 { font-size: var(--t-mid); }
+p  { margin: 0 0 0.9em; color: var(--ink-dim); max-width: 76ch; }
+a  { color: var(--key); text-underline-offset: 2px; }
+code { color: var(--key); }
+strong { color: var(--ink-hi); font-weight: 600; }
+em { color: var(--ink); font-style: normal; text-decoration: underline;
+     text-decoration-color: var(--rule-mid); text-underline-offset: 3px; }
 
-/* Everything numeric. Tabular figures keep columns honest and stop a
-   counting animation from shifting the layout under itself. */
-.num, td.num, .tile-value, .stat, .metric {
-  font-variant-numeric: tabular-nums;
-  font-feature-settings: "tnum" 1, "ss01" 1;
-}
+.up { color: var(--up); } .down { color: var(--down); }
+.cost { color: var(--cost); } .key { color: var(--key); }
+.dim { color: var(--ink-dim); } .faint { color: var(--ink-faint); }
+.good { color: var(--up); } .bad { color: var(--down); }
 
-.mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
-
-.eyebrow {
-  font-size: var(--step--1);
+/* Uppercase micro-labels, the terminal's own voice for a field name. */
+.eyebrow, .tile-key, th, .badge, .stat-key {
+  font-size: var(--t-micro);
   text-transform: uppercase;
-  letter-spacing: 0.14em;
+  letter-spacing: 0.16em;
   color: var(--ink-faint);
   font-weight: 600;
 }
 
-.good { color: var(--good); }
-.bad { color: var(--bad); }
-.cost { color: var(--cost); }
-.dim { color: var(--ink-dim); }
-.faint { color: var(--ink-faint); }
+/* --------------------------------------------------------------- status bar */
 
-/* ------------------------------------------------------------- masthead */
+.statusbar {
+  position: sticky; top: 0; z-index: 20;
+  display: flex; align-items: stretch; flex-wrap: wrap;
+  margin: 0 -18px 26px;
+  border-bottom: 1px solid var(--rule-mid);
+  background: color-mix(in srgb, var(--ground) 86%, transparent);
+  backdrop-filter: blur(8px);
+}
+.statusbar > * {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 14px;
+  border-right: 1px solid var(--rule);
+  white-space: nowrap;
+}
+.statusbar .mark {
+  font-weight: 700; letter-spacing: 0.24em; color: var(--ink-hi);
+  font-size: var(--t-small);
+}
+.statusbar .mark b { color: var(--key); font-weight: 700; }
+.stat-key { color: var(--ink-faint); }
+.stat-val { color: var(--ink-hi); font-size: var(--t-small); }
+.statusbar .spacer { flex: 1; border-right: 0; }
 
-header.top {
-  display: flex; align-items: baseline; justify-content: space-between;
-  gap: 24px; flex-wrap: wrap;
-  padding: 28px 0 20px;
-  border-bottom: 1px solid var(--line);
-  margin-bottom: 40px;
-}
-.brand { display: flex; align-items: baseline; gap: 14px; }
-.brand .mark {
-  font-size: var(--step-1); font-weight: 700; letter-spacing: -0.04em;
-}
-/* The mark carries a hairline underscore that draws itself once on load —
-   the only ornament on the page, and it earns its place by being the thing
-   that says the page is live. */
-.brand .mark::after {
-  content: ""; display: block; height: 2px; margin-top: 4px;
-  background: var(--accent); border-radius: 2px;
-  transform-origin: left;
-  animation: draw var(--slow) var(--ease-out) both;
-}
-@keyframes draw { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+.led { width: 7px; height: 7px; background: var(--up); flex: none; }
+.led.off { background: var(--ink-faint); }
+.led.live { animation: blink 2s steps(1, end) infinite; }
+@keyframes blink { 0%, 60% { opacity: 1; } 61%, 100% { opacity: 0.25; } }
 
-.pill {
-  display: inline-flex; align-items: center; gap: 7px;
-  padding: 4px 11px; border-radius: 999px;
-  border: 1px solid var(--line-bright); background: var(--panel);
-  font-size: var(--step--1); color: var(--ink-dim);
-}
-.pill .dot {
-  width: 6px; height: 6px; border-radius: 50%; background: var(--good);
-  box-shadow: 0 0 0 0 var(--good);
-  animation: pulse 2.4s var(--ease-io) infinite;
-}
-@keyframes pulse {
-  0%   { box-shadow: 0 0 0 0 rgba(53, 208, 165, 0.5); }
-  70%  { box-shadow: 0 0 0 7px rgba(53, 208, 165, 0); }
-  100% { box-shadow: 0 0 0 0 rgba(53, 208, 165, 0); }
-}
-
-/* ---------------------------------------------------------------- panels */
+/* ------------------------------------------------------------------ panels */
 
 .panel {
   background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  padding: 24px;
+  border: 1px solid var(--rule-mid);
+  padding: 0;
+  margin-top: 14px;
 }
-.panel + .panel { margin-top: var(--gap); }
 .panel-head {
-  display: flex; align-items: baseline; justify-content: space-between;
-  gap: 16px; flex-wrap: wrap; margin-bottom: 18px;
-}
-
-section { margin: 56px 0 0; scroll-margin-top: 24px; }
-
-.grid { display: grid; gap: var(--gap); }
-.grid.two { grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
-.grid.tiles { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
-
-/* ----------------------------------------------------------------- tiles */
-
-.tile {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 14px; flex-wrap: wrap;
+  padding: 9px var(--pad);
+  border-bottom: 1px solid var(--rule-mid);
   background: var(--raised);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
-  padding: 16px 16px 14px;
-  transition: border-color var(--fast) var(--ease-io),
-              transform var(--fast) var(--ease-out);
 }
-.tile:hover { border-color: var(--line-bright); transform: translateY(-1px); }
-.tile-key {
-  font-size: var(--step--1); color: var(--ink-faint);
-  text-transform: uppercase; letter-spacing: 0.09em; font-weight: 600;
+.panel-head h3 { font-size: var(--t-small); letter-spacing: 0.14em;
+                 text-transform: uppercase; color: var(--ink); }
+.panel-body { padding: var(--pad); }
+
+/* A section rule that reads like a terminal divider: label, then the line
+   running out to the edge of the column. */
+section { margin: 44px 0 0; scroll-margin-top: 60px; }
+.rule {
+  display: flex; align-items: center; gap: 12px;
+  margin: 0 0 12px;
+  color: var(--key);
+  font-size: var(--t-micro); text-transform: uppercase; letter-spacing: 0.22em;
 }
+.rule::after {
+  content: ""; flex: 1; height: 1px; background: var(--rule-mid);
+}
+
+.grid { display: grid; gap: 1px; background: var(--rule-mid);
+        border: 1px solid var(--rule-mid); }
+.grid.tiles { grid-template-columns: repeat(auto-fit, minmax(148px, 1fr)); }
+.grid.two   { grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); }
+
+/* ------------------------------------------------------------------- tiles */
+
+.tile { background: var(--panel); padding: 11px var(--pad) 12px;
+        transition: background var(--fast) var(--ease); }
+.tile:hover { background: var(--raised); }
 .tile-value {
-  font-size: var(--step-2); font-weight: 600; letter-spacing: -0.03em;
-  margin-top: 6px; line-height: 1.1;
+  font-size: 21px; font-weight: 600; color: var(--ink-hi);
+  margin-top: 5px; letter-spacing: -0.02em; line-height: 1.1;
 }
-.tile-note { font-size: var(--step--1); color: var(--ink-faint); margin-top: 4px; }
+.tile-note { font-size: var(--t-micro); color: var(--ink-faint); margin-top: 3px;
+             letter-spacing: 0.04em; }
 
-/* ---------------------------------------------------------------- tables */
+/* ------------------------------------------------------------------ tables */
 
-table { width: 100%; border-collapse: collapse; font-size: var(--step-0); }
+table { width: 100%; border-collapse: collapse; font-size: var(--t-base); }
 th {
-  text-align: left; font-size: var(--step--1); font-weight: 600;
-  text-transform: uppercase; letter-spacing: 0.09em; color: var(--ink-faint);
-  padding: 0 12px 10px; border-bottom: 1px solid var(--line);
-  white-space: nowrap;
+  text-align: left; padding: 7px var(--pad);
+  border-bottom: 1px solid var(--rule-mid);
+  background: var(--raised);
+  position: sticky; top: 0;
 }
-td { padding: 11px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
-tbody tr { transition: background var(--fast) var(--ease-io); }
+td { padding: 0 var(--pad); height: var(--row);
+     border-bottom: 1px solid var(--rule); vertical-align: middle; }
+tbody tr { transition: background var(--fast) var(--ease); }
 tbody tr:hover { background: var(--raised); }
-td.num, th.num { text-align: right; }
-.scroll-x { overflow-x: auto; margin: 0 -8px; padding: 0 8px; }
+tbody tr:hover td:first-child { box-shadow: inset 2px 0 0 var(--key); }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+tbody tr:last-child td { border-bottom: 0; }
+.scroll-x { overflow-x: auto; }
 
-/* --------------------------------------------------------------- badges */
+/* ------------------------------------------------------------------ badges */
 
 .badge {
-  display: inline-block; padding: 2px 9px; border-radius: 999px;
-  font-size: var(--step--1); font-weight: 600; letter-spacing: 0.02em;
-  border: 1px solid currentColor; white-space: nowrap;
+  display: inline-block; padding: 2px 7px;
+  border: 1px solid currentColor;
+  letter-spacing: 0.14em;
 }
-.badge.refused { color: var(--bad); }
-.badge.opened { color: var(--good); }
-.badge.stood { color: var(--neutral); }
-.badge.halt { color: var(--cost); }
+.badge.opened  { color: var(--up);   background: var(--up-wash); }
+.badge.refused { color: var(--down); background: var(--down-wash); }
+.badge.stood   { color: var(--ink-dim); }
+.badge.halt    { color: var(--cost); background: var(--cost-wash); }
 
-/* ----------------------------------------------------------------- motion */
+/* ------------------------------------------------------------------- notes */
 
-/* Entrance. Children of a .stagger reveal in document order, which is the
-   order the agent computed them in. */
-.reveal { opacity: 0; transform: translateY(14px); }
-.reveal.in {
-  opacity: 1; transform: none;
-  transition: opacity var(--slow) var(--ease-out),
-              transform var(--slow) var(--ease-out);
+.note {
+  border-left: 2px solid var(--cost);
+  background: var(--cost-wash);
+  padding: 10px 14px;
+  color: var(--ink-dim);
+  font-size: var(--t-small);
+  max-width: 90ch;
 }
-.stagger > * { opacity: 0; transform: translateY(10px); }
-.stagger.in > * {
-  opacity: 1; transform: none;
-  transition: opacity var(--mid) var(--ease-out), transform var(--mid) var(--ease-out);
+.note strong { color: var(--ink); }
+
+.lede { font-size: var(--t-mid); color: var(--ink); max-width: 62ch; }
+
+footer.foot {
+  margin-top: 56px; padding: 14px 0; border-top: 1px solid var(--rule-mid);
+  color: var(--ink-faint); font-size: var(--t-micro);
+  letter-spacing: 0.08em; text-transform: uppercase;
+  display: flex; justify-content: space-between; gap: 18px; flex-wrap: wrap;
 }
+
+button.theme-toggle {
+  background: transparent; color: var(--ink-dim);
+  border: 0; border-left: 1px solid var(--rule);
+  font: inherit; font-size: var(--t-micro); letter-spacing: 0.16em;
+  text-transform: uppercase; cursor: pointer; padding: 8px 14px;
+  transition: color var(--fast) var(--ease), background var(--fast) var(--ease);
+}
+button.theme-toggle:hover { color: var(--key); background: var(--key-wash); }
+button.theme-toggle:focus-visible { outline: 1px solid var(--key); outline-offset: -1px; }
+
+/* ------------------------------------------------------------------ motion */
+
+.reveal { opacity: 0; transform: translateY(8px); }
+.reveal.in { opacity: 1; transform: none;
+  transition: opacity var(--slow) var(--ease), transform var(--slow) var(--ease); }
+
+.stagger > * { opacity: 0; }
+.stagger.in > * { opacity: 1; transition: opacity var(--mid) var(--ease); }
 .stagger.in > *:nth-child(1) { transition-delay: 0ms; }
-.stagger.in > *:nth-child(2) { transition-delay: 55ms; }
-.stagger.in > *:nth-child(3) { transition-delay: 110ms; }
-.stagger.in > *:nth-child(4) { transition-delay: 165ms; }
-.stagger.in > *:nth-child(5) { transition-delay: 220ms; }
-.stagger.in > *:nth-child(6) { transition-delay: 275ms; }
-.stagger.in > *:nth-child(7) { transition-delay: 330ms; }
-.stagger.in > *:nth-child(8) { transition-delay: 385ms; }
+.stagger.in > *:nth-child(2) { transition-delay: 40ms; }
+.stagger.in > *:nth-child(3) { transition-delay: 80ms; }
+.stagger.in > *:nth-child(4) { transition-delay: 120ms; }
+.stagger.in > *:nth-child(5) { transition-delay: 160ms; }
+.stagger.in > *:nth-child(6) { transition-delay: 200ms; }
+.stagger.in > *:nth-child(7) { transition-delay: 240ms; }
+.stagger.in > *:nth-child(8) { transition-delay: 280ms; }
 
-/* An SVG series draws itself in the direction it was swept. */
 .draw { stroke-dasharray: var(--len); stroke-dashoffset: var(--len); }
-.draw.in { transition: stroke-dashoffset 1.1s var(--ease-io); stroke-dashoffset: 0; }
+.draw.in { transition: stroke-dashoffset 1s var(--ease); stroke-dashoffset: 0; }
 
-/* A waterfall bar grows from the baseline it is measured against. */
 .grow { transform: scaleY(0); transform-origin: var(--origin, bottom); }
-.grow.in { transition: transform var(--slow) var(--ease-out); transform: scaleY(1); }
+.grow.in { transition: transform var(--slow) var(--ease); transform: scaleY(1); }
+
+/* The headline types itself once, in the terminal's own idiom, with a cursor
+   that stops blinking when the line is finished. Purely presentational: the
+   text is in the markup and is revealed by clipping, never by scripting
+   characters into an empty element. */
+.type { display: inline-block; overflow: hidden; white-space: nowrap;
+        border-right: 0.5ch solid var(--key); }
+.type.in { animation: type 900ms steps(28, end) both, caret 900ms steps(1) 3; }
+@keyframes type { from { max-width: 0; } to { max-width: 100%; } }
+@keyframes caret { 0%, 49% { border-color: var(--key); }
+                   50%, 100% { border-color: transparent; } }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
@@ -312,33 +356,14 @@ td.num, th.num { text-align: right; }
   .reveal, .stagger > * { opacity: 1; transform: none; }
   .draw { stroke-dashoffset: 0; }
   .grow { transform: none; }
+  .type { border-right: 0; max-width: none; }
 }
 
-/* ------------------------------------------------------------------ notes */
-
-.note {
-  border-left: 2px solid var(--line-bright);
-  padding: 2px 0 2px 14px;
-  color: var(--ink-faint);
-  font-size: var(--step--1);
-  max-width: 74ch;
+@media (max-width: 640px) {
+  .statusbar { position: static; }
+  .statusbar > * { padding: 7px 10px; }
+  :root { --pad: 11px; }
 }
-.note strong { color: var(--ink-dim); font-weight: 600; }
-
-footer.foot {
-  margin-top: 72px; padding-top: 24px; border-top: 1px solid var(--line);
-  color: var(--ink-faint); font-size: var(--step--1);
-  display: flex; justify-content: space-between; gap: 20px; flex-wrap: wrap;
-}
-
-.theme-toggle {
-  background: var(--panel); color: var(--ink-dim);
-  border: 1px solid var(--line-bright); border-radius: var(--radius-sm);
-  padding: 5px 11px; font: inherit; font-size: var(--step--1); cursor: pointer;
-  transition: color var(--fast) var(--ease-io), border-color var(--fast) var(--ease-io);
-}
-.theme-toggle:hover { color: var(--ink); border-color: var(--ink-faint); }
-.theme-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 """
 
 
@@ -348,8 +373,6 @@ SCRIPT = """
 (function () {
   var reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-  /* Theme. Remembered per viewer, and it never flashes: the attribute is set
-     from storage before paint by the inline head script. */
   var toggle = document.querySelector("[data-theme-toggle]");
   if (toggle) {
     toggle.addEventListener("click", function () {
@@ -357,13 +380,11 @@ SCRIPT = """
       var next = root.getAttribute("data-theme") === "light" ? "dark" : "light";
       root.setAttribute("data-theme", next);
       try { localStorage.setItem("convex-theme", next); } catch (e) {}
-      toggle.textContent = next === "light" ? "Dark" : "Light";
+      toggle.textContent = next === "light" ? "DARK" : "LIGHT";
     });
   }
 
-  /* Reveal on scroll. Anything marked reveals once, in document order, and
-     is then left alone — nothing re-animates when you scroll back up. */
-  var watched = document.querySelectorAll(".reveal, .stagger, .draw, .grow");
+  var watched = document.querySelectorAll(".reveal, .stagger, .draw, .grow, .type");
   if (!("IntersectionObserver" in window) || reduced) {
     watched.forEach(function (el) { el.classList.add("in"); });
   } else {
@@ -373,41 +394,34 @@ SCRIPT = """
         entry.target.classList.add("in");
         io.unobserve(entry.target);
       });
-    }, { rootMargin: "0px 0px -8% 0px", threshold: 0.08 });
+    }, { rootMargin: "0px 0px -6% 0px", threshold: 0.08 });
     watched.forEach(function (el) { io.observe(el); });
   }
 
-  /* Count a figure up to its value once, when it first appears. The text is
-     already correct in the HTML, so a reader without JavaScript, or one who
-     asked for less motion, sees the final number and never a zero. */
+  /* A figure counts up once, the way a terminal cell settles. The markup
+     already holds the final value, so no JavaScript and no motion both leave
+     the correct number on screen rather than a zero. */
   function countUp(el) {
     var target = parseFloat(el.getAttribute("data-count"));
     if (isNaN(target)) return;
     var places = parseInt(el.getAttribute("data-places") || "0", 10);
     var prefix = el.getAttribute("data-prefix") || "";
-    var suffix = el.getAttribute("data-suffix") || "";
     var signed = el.hasAttribute("data-signed");
     var started = null;
-    var span = 900;
     function frame(now) {
       if (started === null) started = now;
-      var t = Math.min((now - started) / span, 1);
-      var eased = 1 - Math.pow(1 - t, 3);
-      var value = target * eased;
+      var t = Math.min((now - started) / 780, 1);
+      var value = target * (1 - Math.pow(1 - t, 3));
       var text = Math.abs(value).toLocaleString(undefined, {
         minimumFractionDigits: places, maximumFractionDigits: places
       });
-      var sign = value < 0 ? "-" : (signed && value > 0 ? "+" : "");
-      el.textContent = sign + prefix + text + suffix;
+      el.textContent = (value < 0 ? "-" : (signed && value > 0 ? "+" : "")) + prefix + text;
       if (t < 1) requestAnimationFrame(frame);
     }
     requestAnimationFrame(frame);
   }
 
-  var counters = document.querySelectorAll("[data-count]");
-  if (reduced || !("IntersectionObserver" in window)) {
-    /* leave the server-rendered text exactly as it is */
-  } else {
+  if (!reduced && "IntersectionObserver" in window) {
     var co = new IntersectionObserver(function (entries) {
       entries.forEach(function (entry) {
         if (!entry.isIntersecting) return;
@@ -415,12 +429,25 @@ SCRIPT = """
         co.unobserve(entry.target);
       });
     }, { threshold: 0.5 });
-    counters.forEach(function (el) { co.observe(el); });
+    document.querySelectorAll("[data-count]").forEach(function (el) { co.observe(el); });
+  }
+
+  /* The clock in the status bar. A terminal that does not tick looks frozen,
+     and this is the only thing on the page that changes without a reload. */
+  var clock = document.querySelector("[data-clock]");
+  if (clock) {
+    (function tick() {
+      var now = new Date();
+      var parts = now.toLocaleTimeString("en-GB", {
+        timeZone: "America/New_York", hour12: false
+      });
+      clock.textContent = parts + " ET";
+      setTimeout(tick, 1000 - (now.getTime() % 1000));
+    })();
   }
 })();
 """
 
-# Set before first paint so a remembered light theme never flashes dark.
 HEAD_SCRIPT = """
 try {
   var t = localStorage.getItem("convex-theme");
