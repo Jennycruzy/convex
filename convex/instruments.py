@@ -160,3 +160,41 @@ class Leg:
     def signed_mid_cost(self) -> float:
         """Per-share cash effect at mid: positive is paid, negative is received."""
         return self.ratio * self.entry.quote.mid
+
+
+def parse_occ_symbol(symbol: str, multiplier: int) -> OptionContract:
+    """Rebuild a contract from its OCC symbol, e.g. ``SPY260828P00650000``.
+
+    Positions come back from Alpaca as bare OCC symbols with no strike, right
+    or expiry alongside them, and the assignment guard has to know all three to
+    decide whether a leg will settle into shares. The layout is fixed by the
+    OCC: a variable-length root, then six digits of expiry, then C or P, then
+    eight digits of strike in thousandths. Anything that does not match raises,
+    because guessing at a strike is how a guard closes the wrong contract.
+
+    The symbol does not encode the deliverable, so ``multiplier`` is required
+    and comes from the contract record the chain was built from rather than
+    from an assumption about what a SPY option is worth.
+    """
+    if len(symbol) < 16:
+        raise DataError(f"{symbol!r} is too short to be an OCC option symbol")
+    root, tail = symbol[:-15], symbol[-15:]
+    expiry_digits, right_letter, strike_digits = tail[:6], tail[6], tail[7:]
+    if not root or not root.isalpha():
+        raise DataError(f"{symbol!r}: {root!r} is not an underlying root")
+    if not expiry_digits.isdigit() or not strike_digits.isdigit():
+        raise DataError(f"{symbol!r}: expiry or strike is not numeric")
+    if right_letter not in ("C", "P"):
+        raise DataError(f"{symbol!r}: {right_letter!r} is neither C nor P")
+    try:
+        expiry = datetime.strptime(expiry_digits, "%y%m%d").date()
+    except ValueError as exc:
+        raise DataError(f"{symbol!r}: {expiry_digits!r} is not a date") from exc
+    return OptionContract(
+        symbol=symbol,
+        underlying=root,
+        right=Right.CALL if right_letter == "C" else Right.PUT,
+        strike=int(strike_digits) / 1000.0,
+        expiry=expiry,
+        multiplier=multiplier,
+    )

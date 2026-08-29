@@ -20,6 +20,7 @@ import os
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
+from typing import Sequence
 
 from alpaca.data.historical.option import OptionHistoricalDataClient
 from alpaca.data.historical.stock import StockHistoricalDataClient
@@ -345,11 +346,75 @@ class AlpacaGateway:
         except Exception as exc:  # re-raised, never swallowed
             raise ExecutionError(f"Alpaca rejected the multi-leg order: {exc}") from exc
 
+    def close_leg(
+        self,
+        symbol: str,
+        held_contracts: int,
+        limit_price: float,
+        client_order_id: str,
+    ):
+        """Close one option leg with a marketable limit, never a market order.
+
+        ``held_contracts`` is the signed position: positive is long and is sold
+        to close, negative is short and is bought to close. The caller supplies
+        the limit from the live touch, so the price is measured rather than
+        surrendered to whatever the book happens to be showing when the order
+        lands.
+        """
+        if held_contracts == 0:
+            raise ExecutionError(f"{symbol}: refusing to close a position of zero contracts")
+        if limit_price <= 0.0:
+            raise ExecutionError(f"{symbol}: refusing to close at a limit of {limit_price}")
+
+        long_position = held_contracts > 0
+        request = LimitOrderRequest(
+            symbol=symbol,
+            qty=abs(held_contracts),
+            limit_price=round(limit_price, 2),
+            side=OrderSide.SELL if long_position else OrderSide.BUY,
+            position_intent=(
+                PositionIntent.SELL_TO_CLOSE if long_position else PositionIntent.BUY_TO_CLOSE
+            ),
+            time_in_force=TimeInForce.DAY,
+            client_order_id=client_order_id,
+        )
+        try:
+            return self.trading.submit_order(request)
+        except Exception as exc:  # re-raised, never swallowed
+            raise ExecutionError(f"Alpaca rejected the closing order for {symbol}: {exc}") from exc
+
     def order(self, order_id: str):
         return self.trading.get_order_by_id(order_id)
 
     def positions(self):
         return self.trading.get_all_positions()
+
+    def option_quotes(self, symbols: Sequence[str]) -> dict[str, Quote]:
+        """Live two-sided quotes for contracts already held.
+
+        The chain builder cannot serve this: it filters to a strike band around
+        spot, and a leg the guard needs to close may have moved outside that
+        band, which is precisely the case where closing it matters most.
+        """
+        if not symbols:
+            return {}
+        quotes: dict[str, Quote] = {}
+        for snapshot_symbol, snapshot in self._snapshots(list(symbols)).items():
+            if snapshot is None or snapshot.latest_quote is None:
+                continue
+            raw = snapshot.latest_quote
+            quotes[snapshot_symbol] = Quote(
+                symbol=snapshot_symbol,
+                bid=float(raw.bid_price),
+                ask=float(raw.ask_price),
+                bid_size=int(raw.bid_size),
+                ask_size=int(raw.ask_size),
+                timestamp=raw.timestamp,
+            )
+        missing = set(symbols) - set(quotes)
+        if missing:
+            raise DataError(f"no quote came back for {', '.join(sorted(missing))}")
+        return quotes
 
 
 def _number(value, field: str) -> float:

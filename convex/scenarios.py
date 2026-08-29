@@ -79,6 +79,20 @@ class ScenarioSet:
             raise DataError("scenario returns have zero dispersion")
         return float(np.mean(centred**3) / sigma**3)
 
+    def annualised_variance(self, tau: float) -> np.ndarray:
+        """Each session's realised variance, annualised to match implied units.
+
+        The regime rule compares today's implied variance against a history of
+        variance readings. Recorded implied variance is the natural comparison
+        but does not exist until the agent has run for weeks, so the comparison
+        is made against realised session variance over the same clock, scaled
+        by the same tau the implied figure uses. The gap between the two is the
+        variance risk premium, which is exactly what a regime call is about.
+        """
+        if tau <= 0.0:
+            raise DataError(f"tau must be positive to annualise variance, found {tau}")
+        return (self.log_returns**2) / tau
+
     def prices(self, spot: float) -> np.ndarray:
         """Terminal underlying prices implied by each scenario."""
         if spot <= 0.0:

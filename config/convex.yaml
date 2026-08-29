@@ -23,7 +23,13 @@ session:
   timezone: America/New_York
   entry_time: "10:00"               # the paper's main specification
   close_time: "16:00"
-  assignment_guard_minutes: 30      # no in-the-money short may be held inside this
+  assignment_guard_minutes: 30      # no leg that can settle into shares survives this
+  # How close to a strike still counts as at risk of exercise. SPY is physically
+  # settled, so a leg pinned to its strike at 15:45 can become a hundred shares
+  # overnight. HYPOTHESIS until the closing minutes of a real session have been
+  # watched: the band as a fraction of spot.
+  pin_band_pct: 0.0015
+  manager_poll_seconds: 60          # how often the guard re-reads the account
 
 candidates:
   # The paper's 0.98-1.02 moneyness band, expressed as a fraction of spot so it
