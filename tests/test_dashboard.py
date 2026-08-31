@@ -548,3 +548,83 @@ def test_the_log_is_introduced_once_and_not_twice(client):
     page = session.get("/").text
     assert "<h2>Decisions</h2>" not in page
     assert page.count("EVERY DECISION, INCLUDING EVERY REFUSAL") == 1
+
+
+# ----------------------------------------------------- the realised equity curve
+
+
+def closed(pnl, cost=None, cycle="c1"):
+    outcome = {"realised_pnl": pnl}
+    if cost is not None:
+        outcome["execution_cost"] = cost
+    return Record(
+        action=Action.POSITION_CLOSED,
+        cycle_id=cycle,
+        structure="put_bwb",
+        rationale="expired",
+        outcome=outcome,
+    )
+
+
+def test_the_realised_curve_is_empty_until_a_position_actually_closes(client):
+    session, path = client
+    write(path, refusal(), Record(
+        action=Action.STAND_DOWN, cycle_id="c1", rationale="calibration refused"
+    ))
+    gross, net = read.realised_curve(read.load(path))
+    assert gross == [] and net == []
+
+    page = session.get("/").text
+    assert "REALISED, THIS ACCOUNT" in page
+    assert "placed no orders yet" in page
+
+
+def test_the_empty_realised_panel_draws_no_curve_at_all(client):
+    """Not a flat line at zero, which would read as having traded to breakeven."""
+    session, path = client
+    write(path, refusal())
+    page = session.get("/").text
+    head, _, _ = page.partition("REPLAY, GROSS AGAINST NET")
+    _, _, realised = head.partition("REALISED, THIS ACCOUNT")
+    assert "<svg" not in realised
+
+
+def test_the_realised_curve_accumulates_closes_in_ledger_order(client):
+    session, path = client
+    write(path, closed(120.0), closed(-45.0), closed(30.0))
+    gross, net = read.realised_curve(read.load(path))
+    assert net == [120.0, 75.0, 105.0]
+    # No cost recorded on any close, so the two curves coincide rather than
+    # showing a band that was never measured.
+    assert gross == net
+
+
+def test_a_close_carrying_its_cost_separates_the_two_curves(client):
+    session, path = client
+    write(path, closed(100.0, cost=20.0), closed(-10.0, cost=15.0))
+    gross, net = read.realised_curve(read.load(path))
+    assert net == [100.0, 90.0]
+    assert gross == [120.0, 125.0]
+
+
+def test_a_close_without_its_number_adds_no_point_rather_than_a_zero(client):
+    session, path = client
+    write(
+        path,
+        closed(50.0),
+        Record(action=Action.POSITION_CLOSED, cycle_id="c2", structure="put_bwb",
+               rationale="guard closed a leg", outcome={"status": "accepted"}),
+    )
+    _, net = read.realised_curve(read.load(path))
+    assert net == [50.0]
+
+
+def test_the_realised_panel_draws_once_there_are_two_closes(client):
+    session, path = client
+    write(path, closed(120.0), closed(-45.0))
+    page = session.get("/").text
+    head, _, _ = page.partition("REPLAY, GROSS AGAINST NET")
+    _, _, realised = head.partition("REALISED, THIS ACCOUNT")
+    assert "<svg" in realised
+    assert "+75.00 net" in realised
+    assert "2 structure(s) settled" in realised

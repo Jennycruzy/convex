@@ -25,7 +25,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 from convex.config import Config, load
 from convex.dashboard import read
 from convex.dashboard import ui
-from convex.dashboard.charts import payoff_svg, sensitivity_svg, waterfall_svg
+from convex.dashboard.charts import equity_svg, payoff_svg, sensitivity_svg, waterfall_svg
 from convex.ledger import Action
 
 STYLE = """
@@ -191,6 +191,65 @@ def _backtest_panel(report: dict) -> str:
         row(arm.get("label", name), arm, emphasis=True)
 
     body.append("</tbody></table></div>")
+
+    # The same argument the table makes, drawn over time. The classified basket
+    # is the arm the project actually proposes, so it is the one shown; the
+    # curve comes out of the replay that produced the table above it and is
+    # never assembled from anything else.
+    basket = report.get("basket", {}).get("classified", {})
+    net_curve = basket.get("net_curve") or []
+    if len(net_curve) > 1:
+        body.append(
+            "<p>The running total of that same replay. The pale line is gross "
+            "and the solid one is net, and the shaded band between them is what "
+            "the execution took. They start together.</p>"
+        )
+        body.append(
+            "<div class='panel reveal'>"
+            + equity_svg(
+                basket.get("gross_curve") or [],
+                net_curve,
+                sessions=sessions,
+                label=basket.get("label", "basket, classified"),
+            )
+            + "</div>"
+        )
+    elif report.get("basket"):
+        # An older report, written before the curve was retained. Saying so is
+        # better than drawing nothing and letting a reader assume the replay
+        # had no trades in it.
+        body.append(
+            "<div class='empty'><p>This replay was written before the running "
+            "total was recorded, so only the table above is available from it. "
+            "Rerunning the backfill fills in the curve.</p></div>"
+        )
+    return "".join(body)
+
+
+def _realised_panel(records, summary) -> str:
+    """What the account itself earned, drawn only where the ledger says so."""
+    gross_curve, net_curve = read.realised_curve(records)
+    body = [
+        _section("receipts", "REALISED, THIS ACCOUNT"),
+        "<p>The running result of positions this agent opened and closed, read "
+        "back out of the same ledger every other figure on this page comes "
+        "from. It is not the replay below and it is not seeded from it.</p>",
+        "<div class='panel reveal'>",
+        equity_svg(gross_curve, net_curve, label="realised"),
+    ]
+    if net_curve:
+        body.append(
+            f"<p class='note' style='margin-top:16px'>"
+            f"{summary.settled_structures} structure(s) settled for "
+            f"{summary.realised_pnl:+,.2f} net.</p>"
+        )
+    else:
+        body.append(
+            "<p class='note' style='margin-top:16px'>The agent has placed no "
+            "orders yet, so there is nothing to plot. This panel is wired to "
+            "the ledger and fills in on its own from the first close.</p>"
+        )
+    body.append("</div>")
     return "".join(body)
 
 
@@ -394,6 +453,12 @@ def create_app(config: Config | None = None) -> FastAPI:
         cycles = read.cycles(rows)
         if cycles:
             body.append(_cycle_panel(cycles[0]))
+
+        # The account's own result, before the replay, because a reader should
+        # meet what this agent really did before meeting what it would have
+        # done. Until a position closes it is a stated absence, never a flat
+        # line at zero and never seeded from the replay below it.
+        body.append(_realised_panel(rows, summary))
 
         replay = backtest_report()
         if replay.get("per_family") or replay.get("basket"):

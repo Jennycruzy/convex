@@ -5,7 +5,7 @@ browser. A deployed demo that renders a blank panel because a CDN was slow or
 blocked scores as a demo that does not work, and the whole reason the dashboard
 exists is that judges have to be able to load it.
 
-Two charts:
+Three charts:
 
   the cost waterfall   gross edge, then a bar down for each component of
                        execution cost, then what is left. When the net bar is
@@ -18,6 +18,14 @@ Two charts:
                        flat positive tail above every strike is visible, which
                        is the thing that makes it worth trading over a ratio
                        spread with an open downside.
+
+  the equity curve     the running total, gross and net, over the trades an arm
+                       actually took. The same argument as the waterfall told
+                       over time: the two lines start together and separate,
+                       and the gap between them at the right edge is what the
+                       execution ate. It draws whatever it is handed and never
+                       invents a series, so an arm with no trades yet renders
+                       as a stated absence.
 """
 
 from __future__ import annotations
@@ -344,6 +352,149 @@ def sensitivity_svg(points: Sequence[dict], width: int = 940, height: int = 380)
         f"<g font-size='11'>"
         f"<line x1='{pad_l}' y1='{pad_t - 6}' x2='{pad_l + 18}' y2='{pad_t - 6}' "
         f"stroke='var(--key)' stroke-width='2.5'/>"
+        f"<text x='{pad_l + 24}' y='{pad_t - 2}' fill='var(--ink-dim)'>net</text>"
+        f"<line x1='{pad_l + 60}' y1='{pad_t - 6}' x2='{pad_l + 78}' y2='{pad_t - 6}' "
+        f"stroke='var(--ink-faint)' stroke-width='1.5' stroke-dasharray='4 4'/>"
+        f"<text x='{pad_l + 84}' y='{pad_t - 2}' fill='var(--ink-dim)'>gross</text>"
+        f"</g>"
+    )
+    out.append("</svg>")
+    return "".join(out)
+
+
+def equity_svg(
+    gross_curve: Sequence[float],
+    net_curve: Sequence[float],
+    sessions: int | None = None,
+    label: str = "",
+    width: int = 940,
+    height: int = 320,
+) -> str:
+    """Running gross and net over the trades taken, in the order they were taken.
+
+    The waterfall makes the cost argument once, on one trade. This makes it
+    over a whole replay: two lines from a common origin, the pale one gross and
+    the solid one net, and the distance between them at the right edge is the
+    execution cost of the entire arm.
+
+    It draws only what it is given. An empty series is not a flat line at zero,
+    which would read as a strategy that traded and broke even; it is a sentence
+    saying nothing has been recorded. That distinction is the whole reason this
+    dashboard is worth loading.
+    """
+    gross = [float(value) for value in gross_curve]
+    net = [float(value) for value in net_curve]
+    if not net:
+        return (
+            "<p class='faint'>No settled trades yet, so there is no curve to draw. "
+            "This fills in from the ledger as positions close.</p>"
+        )
+    if len(net) == 1:
+        return (
+            f"<p class='faint'>One settled trade so far, at {_money(net[0])} net. "
+            "A curve needs a second point.</p>"
+        )
+    if len(gross) != len(net):
+        raise ValueError(
+            f"the gross curve has {len(gross)} points and the net curve {len(net)}; "
+            "they are the same trades and must be the same length"
+        )
+
+    pad_l, pad_r, pad_t, pad_b = 68, 24, 26, 46
+    plot_w = width - pad_l - pad_r
+    plot_h = height - pad_t - pad_b
+
+    # Both series share one scale, because the gap between them is the point.
+    # Zero is always in view for the same reason: a net curve that never rises
+    # above it has to be seen not to.
+    y_lo = min(min(net), min(gross), 0.0)
+    y_hi = max(max(net), max(gross), 0.0)
+    span = (y_hi - y_lo) or 1.0
+    y_lo -= span * 0.10
+    y_hi += span * 0.10
+    last = len(net) - 1
+
+    def sx(index: int) -> float:
+        return pad_l + (index / last if last else 0.0) * plot_w
+
+    def sy(value: float) -> float:
+        return pad_t + (y_hi - value) / (y_hi - y_lo) * plot_h
+
+    out: list[str] = [
+        f"<svg viewBox='0 0 {width} {height}' width='100%' role='img' "
+        f"aria-label='Running gross and net result over "
+        f"{len(net)} trades' style='overflow:visible'>"
+    ]
+
+    zero = sy(0.0)
+    out.append(
+        f"<line x1='{pad_l}' y1='{zero:.1f}' x2='{pad_l + plot_w}' y2='{zero:.1f}' "
+        f"stroke='var(--rule-mid)' stroke-width='1'/>"
+        f"<text x='{pad_l - 10}' y='{zero + 4:.1f}' fill='var(--ink-dim)' "
+        f"font-size='11' text-anchor='end'>0</text>"
+    )
+    for value in (y_lo, y_hi):
+        out.append(
+            f"<text x='{pad_l - 10}' y='{sy(value) + 4:.1f}' fill='var(--ink-dim)' "
+            f"font-size='11' text-anchor='end'>{value:,.0f}</text>"
+        )
+
+    def path_of(values: Sequence[float]) -> str:
+        return " ".join(
+            ("M" if index == 0 else "L") + f"{sx(index):.1f},{sy(value):.1f}"
+            for index, value in enumerate(values)
+        )
+
+    # The gap the execution took, shaded between the two series. It is drawn
+    # first so both lines sit on top of it, and it is the figure a reader
+    # should come away with.
+    out.append(
+        f"<path d='{path_of(gross)} "
+        + " ".join(f"L{sx(i):.1f},{sy(v):.1f}" for i, v in reversed(list(enumerate(net))))
+        + f" Z' fill='var(--cost)' opacity='0.10'/>"
+    )
+
+    out.append(
+        f"<path d='{path_of(gross)}' fill='none' stroke='var(--ink-faint)' "
+        f"stroke-width='1.5' stroke-dasharray='4 4' opacity='0.8'/>"
+    )
+    ends_up = net[-1] >= 0.0
+    colour = "var(--up)" if ends_up else "var(--down)"
+    out.append(
+        f"<path class='draw' style='--len:{int(plot_w * 1.6)}' d='{path_of(net)}' "
+        f"fill='none' stroke='{colour}' stroke-width='2.5' stroke-linecap='round' "
+        f"stroke-linejoin='round'/>"
+    )
+
+    # Where each series finishes, which is the only pair of values a reader
+    # needs to take away from the chart.
+    out.append(
+        f"<circle cx='{sx(last):.1f}' cy='{sy(net[last]):.1f}' r='4.5' fill='{colour}' "
+        f"stroke='var(--panel)' stroke-width='2'>"
+        f"<title>net {_money(net[last])} after {len(net)} trades</title></circle>"
+        f"<text x='{sx(last):.1f}' y='{sy(net[last]) - 12:.1f}' fill='{colour}' "
+        f"font-size='12' font-weight='600' text-anchor='end'>{_money(net[last])} net</text>"
+        f"<text x='{sx(last):.1f}' y='{sy(gross[last]) - 10:.1f}' fill='var(--ink-dim)' "
+        f"font-size='11' text-anchor='end'>{_money(gross[last])} gross</text>"
+    )
+
+    # The denominator, carried next to the chart in the same spirit as the
+    # Sharpe that refuses to print below twenty observations. A curve over four
+    # trades is a picture, not evidence, and the reader is told which it is.
+    footing = f"{len(net)} trades"
+    if sessions is not None:
+        footing += f" over {sessions} sessions"
+    if label:
+        footing = f"{escape(label)} · {footing}"
+    out.append(
+        f"<text x='{pad_l + plot_w / 2:.1f}' y='{height - 8}' fill='var(--ink-dim)' "
+        f"font-size='11' text-anchor='middle'>{footing}</text>"
+    )
+
+    out.append(
+        f"<g font-size='11'>"
+        f"<line x1='{pad_l}' y1='{pad_t - 6}' x2='{pad_l + 18}' y2='{pad_t - 6}' "
+        f"stroke='{colour}' stroke-width='2.5'/>"
         f"<text x='{pad_l + 24}' y='{pad_t - 2}' fill='var(--ink-dim)'>net</text>"
         f"<line x1='{pad_l + 60}' y1='{pad_t - 6}' x2='{pad_l + 78}' y2='{pad_t - 6}' "
         f"stroke='var(--ink-faint)' stroke-width='1.5' stroke-dasharray='4 4'/>"

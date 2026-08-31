@@ -218,6 +218,46 @@ def waterfalls(records: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
     return rows
 
 
+def realised_curve(records: Iterable[dict[str, Any]]) -> tuple[list[float], list[float]]:
+    """The account's own running result, gross and net, one point per close.
+
+    Read from ``position_closed`` records in ledger order, which is settlement
+    order. Nothing here is modelled or replayed: a point exists only where the
+    agent opened a position and it was closed out for a number the ledger
+    recorded.
+
+    That means this returns two empty lists until the agent has actually
+    traded, and the caller is expected to say so rather than draw a flat line
+    at zero. A flat line reads as a strategy that traded and broke even, which
+    is a different and much more flattering claim than having not traded.
+
+    A close without ``realised_pnl`` is skipped and not counted, on the same
+    principle as the cost totals above: a receipt missing its number is not a
+    zero.
+    """
+    gross_running = 0.0
+    net_running = 0.0
+    gross_curve: list[float] = []
+    net_curve: list[float] = []
+    for row in records:
+        if row.get("action") != Action.POSITION_CLOSED.value:
+            continue
+        outcome = row.get("outcome") or {}
+        if "realised_pnl" not in outcome:
+            continue
+        net = float(outcome["realised_pnl"])
+        # The realised figure is already net of what it cost to get in and out.
+        # Gross is only available where the close recorded the cost alongside
+        # it; where it did not, the two curves coincide and the chart shows no
+        # band rather than an invented one.
+        cost = float(outcome.get("execution_cost", 0.0))
+        net_running += net
+        gross_running += net + cost
+        net_curve.append(round(net_running, 2))
+        gross_curve.append(round(gross_running, 2))
+    return gross_curve, net_curve
+
+
 def find_decision(records: Iterable[dict[str, Any]], sequence: int) -> dict[str, Any] | None:
     for record in records:
         if record.get("seq") == sequence:

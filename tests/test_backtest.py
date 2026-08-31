@@ -14,6 +14,7 @@ import numpy as np
 import pytest
 
 from convex import backtest
+from convex.dashboard import charts
 from convex.errors import DataError
 from convex.structures.base import Family
 from convex.training import Sample
@@ -225,3 +226,71 @@ def test_the_report_serialises_every_figure_in_both_forms():
     payload = backtest.run(rows, probabilities={}).as_dict()
     arm = payload["per_family"][str(Family.PUT_BWB)]["every session"]
     assert {"gross_total", "net_total", "gross_sharpe", "net_sharpe"} <= set(arm)
+
+
+# ------------------------------------------------------------- the equity curve
+
+
+def test_the_running_total_is_kept_not_just_the_drawdown_measured_from_it():
+    """max_drawdown already walks this curve. Keeping it is what lets the page
+    draw the shape the drawdown is a number about."""
+    rows = [sample(index, gross=5.0, cost=2.0) for index in range(4)]
+    arm = backtest.run(rows, probabilities={}).per_family[str(Family.PUT_BWB)]["every session"]
+
+    assert arm.net_curve == pytest.approx((3.0, 6.0, 9.0, 12.0))
+    assert arm.gross_curve == pytest.approx((5.0, 10.0, 15.0, 20.0))
+    assert arm.net_curve[-1] == pytest.approx(arm.net_total)
+    assert arm.gross_curve[-1] == pytest.approx(arm.gross_total)
+
+
+def test_the_curve_survives_the_round_trip_through_the_report():
+    rows = [sample(index, gross=5.0, cost=2.0) for index in range(3)]
+    payload = backtest.run(rows, probabilities={}).as_dict()
+    arm = payload["per_family"][str(Family.PUT_BWB)]["every session"]
+    assert arm["net_curve"] == [3.0, 6.0, 9.0]
+    assert arm["gross_curve"] == [5.0, 10.0, 15.0]
+
+
+def test_the_curve_is_the_traded_result_like_every_other_total():
+    rows = [
+        sample(index, gross=5.0, cost=2.0, label_gross=10.0, label_cost=100.0)
+        for index in range(3)
+    ]
+    arm = backtest.run(rows, probabilities={}).per_family[str(Family.PUT_BWB)]["every session"]
+    assert arm.net_curve == pytest.approx((3.0, 6.0, 9.0))
+
+
+def test_an_empty_equity_curve_is_a_sentence_not_a_flat_line_at_zero():
+    """A flat line reads as a strategy that traded and broke even, which is a
+    far more flattering claim than not having traded."""
+    drawn = charts.equity_svg([], [])
+    assert "<svg" not in drawn
+    assert "no settled trades yet" in drawn.lower()
+
+    one = charts.equity_svg([10.0], [5.0])
+    assert "<svg" not in one
+    assert "+5.00" in one
+
+
+def test_the_equity_curve_draws_both_series_and_labels_its_denominator():
+    drawn = charts.equity_svg(
+        [10.0, 25.0, 18.0, 40.0], [6.0, 15.0, 4.0, 12.0],
+        sessions=276, label="basket, classified",
+    )
+    assert "<svg" in drawn
+    assert "+12.00 net" in drawn
+    assert "+40.00 gross" in drawn
+    assert "4 trades over 276 sessions" in drawn
+    assert "basket, classified" in drawn
+
+
+def test_mismatched_curve_lengths_raise_rather_than_draw_a_wrong_shape():
+    with pytest.raises(ValueError):
+        charts.equity_svg([1.0, 2.0], [1.0, 2.0, 3.0])
+
+
+def test_a_curve_that_ends_under_water_is_coloured_as_a_loss():
+    losing = charts.equity_svg([5.0, 9.0], [-2.0, -8.0])
+    winning = charts.equity_svg([5.0, 9.0], [2.0, 8.0])
+    assert "var(--down)" in losing and "var(--up)" not in losing
+    assert "var(--up)" in winning

@@ -67,6 +67,12 @@ class Performance:
     hit_rate: float | None
     expected_shortfall: float | None
     max_drawdown: float
+    # The running total, one entry per trade in the order they were taken.
+    # max_drawdown already walks this curve to find its worst fall; keeping it
+    # is what lets the page draw the thing the drawdown is measured on, rather
+    # than reporting a number about a shape nobody is shown.
+    gross_curve: tuple[float, ...] = ()
+    net_curve: tuple[float, ...] = ()
 
     @property
     def cost_share_of_gross(self) -> float | None:
@@ -98,6 +104,8 @@ class Performance:
             "cost_share_of_gross": (
                 None if self.cost_share_of_gross is None else round(self.cost_share_of_gross, 4)
             ),
+            "gross_curve": [round(value, 2) for value in self.gross_curve],
+            "net_curve": [round(value, 2) for value in self.net_curve],
         }
 
 
@@ -117,11 +125,16 @@ def sharpe(series: np.ndarray) -> float | None:
     return float(series.mean() / deviation * np.sqrt(TRADING_DAYS_PER_YEAR))
 
 
+def cumulative(series: np.ndarray) -> np.ndarray:
+    """The running total of a per-trade series, which is its equity curve."""
+    return np.cumsum(series)
+
+
 def max_drawdown(series: np.ndarray) -> float:
     """Largest peak-to-trough fall of the cumulative result, as a positive."""
     if series.size == 0:
         return 0.0
-    curve = np.cumsum(series)
+    curve = cumulative(series)
     peak = np.maximum.accumulate(curve)
     return float(np.max(peak - curve))
 
@@ -156,6 +169,8 @@ def measure(
         hit_rate=float((net_array > 0).mean()) if net_array.size else None,
         expected_shortfall=expected_shortfall(net_array, confidence),
         max_drawdown=max_drawdown(net_array),
+        gross_curve=tuple(cumulative(gross_array).tolist()),
+        net_curve=tuple(cumulative(net_array).tolist()),
     )
 
 
