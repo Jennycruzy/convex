@@ -219,6 +219,7 @@ def arbitrage_free(
                    the underlying (calls) or the strike (puts) imposes
       monotonicity calls cheapen as the strike rises, puts richen
       convexity    the butterfly around each interior strike is non-negative
+      verticals    a spread costs no more than the distance between its strikes
 
     Points that violate are removed, not adjusted. Nudging a print into line
     would invent a trade nobody made; dropping it only narrows the ladder, and
@@ -250,26 +251,65 @@ def arbitrage_free(
         if right is Right.PUT:
             monotone.reverse()
 
-        # Convex in strike. A strike whose price sits above the chord joining
-        # its neighbours makes the butterfly around it negative, so it is the
-        # print out of line and it goes. Removing one point can expose another,
-        # so this repeats until the side is clean.
-        convex = monotone
+        # Convex in strike, and no vertical that costs more than it can pay.
+        #
+        # Convexity alone was not enough, and the sweep is what found it.
+        # Convexity bounds the butterfly weighted by the two wing widths, but a
+        # broken-wing butterfly is weighted 1/-2/1 instead, and those are the
+        # same weights only when the wings are equal, which is the one case
+        # this project never trades. So a surface can be perfectly convex and
+        # still price a broken wing at a credit larger than the gap between its
+        # wings, which pays at every expiry price and is an arbitrage. The
+        # missing condition is the vertical: a spread cannot cost more than the
+        # distance between its strikes, because that is the most it can ever
+        # pay. Convexity plus that bound rules the credit out.
+        #
+        # Under convexity the steepest vertical is the outermost pair, deepest
+        # in the money, where a strike prints rarely and a stale print sits
+        # furthest from where the book was. That is the end a violation trims.
+        cleaned = monotone
         changed = True
-        while changed and len(convex) >= 3:
+        while changed and len(cleaned) >= 2:
             changed = False
-            for index in range(1, len(convex) - 1):
-                left, middle, right_row = convex[index - 1], convex[index], convex[index + 1]
+
+            for index in range(1, len(cleaned) - 1):
+                left, middle, right_row = cleaned[index - 1], cleaned[index], cleaned[index + 1]
                 span = right_row.contract.strike - left.contract.strike
                 if span <= 0:
                     continue
                 weight = (right_row.contract.strike - middle.contract.strike) / span
                 chord = weight * left.entry_price + (1.0 - weight) * right_row.entry_price
                 if middle.entry_price > chord + 1e-6:
-                    convex = convex[:index] + convex[index + 1 :]
+                    cleaned = cleaned[:index] + cleaned[index + 1 :]
                     changed = True
                     break
-        kept.extend(convex)
+            if changed:
+                continue
+
+            # Calls steepen towards the low strikes and puts towards the high
+            # ones, so each side is scanned from its own deep-in-the-money end
+            # and the outer print of the offending pair is the one dropped.
+            if right is Right.CALL:
+                # index is the lower strike of the pair, and the outer print.
+                pairs = [(index, index, index + 1) for index in range(len(cleaned) - 1)]
+            else:
+                # index is the higher strike of the pair, and the outer print.
+                pairs = [(index, index - 1, index) for index in range(len(cleaned) - 1, 0, -1)]
+            for drop, low, high in pairs:
+                lower, upper = cleaned[low], cleaned[high]
+                width = upper.contract.strike - lower.contract.strike
+                if width <= 0:
+                    continue
+                cost = (
+                    lower.entry_price - upper.entry_price
+                    if right is Right.CALL
+                    else upper.entry_price - lower.entry_price
+                )
+                if cost > width + 1e-6:
+                    cleaned = cleaned[:drop] + cleaned[drop + 1 :]
+                    changed = True
+                    break
+        kept.extend(cleaned)
     return kept
 
 
@@ -629,6 +669,29 @@ class RebuiltWindow:
         return build_features
 
 
+# How far behind live the complimentary option feed runs. Asking it for
+# anything newer is refused with "OPRA agreement is not signed", which is not
+# what the refusal means: the entitlement is fine, the data is simply not out
+# of its delay yet. Nothing here needs recent data, so nothing here asks.
+FEED_DELAY = timedelta(minutes=15)
+
+
+def last_rebuildable_session(now: datetime, close_time: time, zone: ZoneInfo) -> date:
+    """The most recent date a session can honestly be rebuilt from.
+
+    Today is excluded until it has closed and cleared the feed delay, for two
+    separate reasons and either one would be enough. A session is labelled by
+    where it settled, and a session still trading has not settled. And the
+    delayed feed will not serve the current session's tape at all, so asking
+    for it fails the whole walk rather than returning a thin day.
+    """
+    today = now.astimezone(zone).date()
+    close_at = datetime.combine(today, close_time, tzinfo=zone)
+    if now < close_at + FEED_DELAY:
+        return today - timedelta(days=1)
+    return today
+
+
 def rebuild_window(
     gateway,
     config: Config,
@@ -649,7 +712,7 @@ def rebuild_window(
     minimum = config.float_("reconstruction.min_coverage")
 
     now, _ = gateway.clock()
-    end = now.date()
+    end = last_rebuildable_session(now, close_time, zone)
     start = end - timedelta(days=days)
     sessions = gateway.sessions(start, end)
     if not sessions:

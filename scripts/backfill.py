@@ -84,7 +84,11 @@ def main() -> int:
         )
 
     now, _ = gateway.clock()
-    end = now.date()
+    # The same rule the replay uses, from the same helper, so the two cannot
+    # disagree about which sessions exist.
+    end = reconstruct.last_rebuildable_session(
+        now, dtime.fromisoformat(config.str_("session.close_time")), zone
+    )
     start = end - timedelta(days=arguments.days)
     sessions = gateway.sessions(start, end)
     if not sessions:

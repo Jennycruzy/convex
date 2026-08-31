@@ -9,14 +9,19 @@ but a confident one where there should be none.
 from __future__ import annotations
 
 import math
-from datetime import date
+from datetime import date, datetime, time, timezone
+from zoneinfo import ZoneInfo
 
 import pytest
 
+from convex import reconstruct
 from convex.config import load
 from convex.errors import DataError
 from convex.instruments import Right
+from convex.instruments import OptionContract
 from convex.reconstruct import (
+    ReconstructedEntry,
+    arbitrage_free,
     black_scholes,
     implied_volatility,
     occ_symbol,
@@ -127,3 +132,111 @@ def test_the_tape_features_are_computable_from_both_sides_of_the_seam():
 
     produced = set(tape_features([(Right.PUT, 5)]))
     assert produced <= set(RECONSTRUCTED_FEATURES)
+
+
+# --------------------------------------------------- which sessions are usable
+
+
+def test_the_current_session_is_excluded_until_it_has_closed_and_cleared_the_delay():
+    """Two independent reasons, either sufficient. A session still trading has
+    not settled, and settlement is what labels it. And the complimentary feed
+    refuses the current session's tape, reporting it as an unsigned OPRA
+    agreement, which is not what the refusal means."""
+    zone = ZoneInfo("America/New_York")
+    close = time(16, 0)
+    day = date(2026, 8, 31)
+
+    def at(hour, minute=0):
+        return reconstruct.last_rebuildable_session(
+            datetime.combine(day, time(hour, minute), tzinfo=zone), close, zone
+        )
+
+    # Before the open, mid-session, and at the bell: yesterday is the latest.
+    assert at(5, 23) == date(2026, 8, 30)
+    assert at(11, 0) == date(2026, 8, 30)
+    assert at(16, 0) == date(2026, 8, 30)
+    # Inside the feed's delay, still yesterday.
+    assert at(16, 14) == date(2026, 8, 30)
+    # Once the delay has passed, today is rebuildable.
+    assert at(16, 15) == date(2026, 8, 31)
+    assert at(20, 0) == date(2026, 8, 31)
+
+
+def test_the_cutoff_is_computed_in_the_market_timezone_not_the_callers():
+    """A UTC clock reading 02:00 on the first is still the previous afternoon
+    in New York, and must not advance the window a day early."""
+    zone = ZoneInfo("America/New_York")
+    close = time(16, 0)
+    utc_small_hours = datetime(2026, 9, 1, 2, 0, tzinfo=timezone.utc)
+    assert reconstruct.last_rebuildable_session(utc_small_hours, close, zone) == date(2026, 8, 31)
+
+
+EXPIRY = date(2026, 8, 31)
+SPOT = 769.30
+
+
+def _printed(strike: float, price: float, right: Right = Right.PUT) -> ReconstructedEntry:
+    """One strike's print, with the fields the cleaning actually reads."""
+    return ReconstructedEntry(
+        contract=OptionContract(
+            symbol=occ_symbol("SPY", EXPIRY, right, strike),
+            underlying="SPY",
+            right=right,
+            strike=strike,
+            expiry=EXPIRY,
+            multiplier=100,
+        ),
+        entry_price=price,
+        implied_volatility=None,
+        trades=5,
+        volume=50,
+    )
+
+
+def _strikes(rows) -> list[float]:
+    return [row.contract.strike for row in rows]
+
+
+@pytest.mark.parametrize(
+    "right, base, prices",
+    [
+        (Right.PUT, 755.0, [0.40, 0.90, 2.10, 4.60]),
+        (Right.CALL, 770.0, [4.60, 2.10, 0.90, 0.40]),
+    ],
+)
+def test_a_ladder_a_real_book_could_have_shown_survives_untouched(right, base, prices):
+    """Cleaning is only worth having if it leaves an honest chain alone."""
+    rows = [_printed(base + 5.0 * i, price, right) for i, price in enumerate(prices)]
+    assert _strikes(arbitrage_free(rows, SPOT)) == [base + 5.0 * i for i in range(4)]
+
+
+def test_a_vertical_costing_more_than_its_width_does_not_survive():
+    """The 765/770 put spread here costs 8.00 to own 5.00 of strike distance,
+    which no book has ever quoted: the most it can pay at expiry is 5.00."""
+    rows = [_printed(755.0, 1.0), _printed(765.0, 16.0), _printed(770.0, 24.0)]
+    assert 770.0 not in _strikes(arbitrage_free(rows, SPOT))
+
+
+def test_a_convex_surface_can_still_price_a_broken_wing_at_an_impossible_credit():
+    """The condition convexity misses, and the reason it misses it.
+
+    Convexity bounds the butterfly weighted by the wing widths. A broken wing
+    is weighted 1/-2/1, and the two agree only when the wings are equal. So
+    this ladder is convex, monotone and within bounds, and still pays the
+    structure a credit of 7.00 against wings 5.00 and 10.00 apart, which is
+    2.00 of profit at every price the underlying can expire at.
+    """
+    upper, body, lower = _printed(770.0, 24.0), _printed(765.0, 16.0), _printed(755.0, 1.0)
+    near_wing, far_wing = 770.0 - 765.0, 765.0 - 755.0
+
+    credit = -(upper.entry_price - 2 * body.entry_price + lower.entry_price)
+    assert credit > far_wing - near_wing
+
+    # Convex: the body sits under the chord joining the wings.
+    weight = (770.0 - 765.0) / (770.0 - 755.0)
+    assert body.entry_price <= weight * lower.entry_price + (1 - weight) * upper.entry_price
+
+    # And the cleaning refuses it anyway, on the vertical rather than the
+    # butterfly. Both offending prints go, leaving nothing to build it from.
+    survivors = _strikes(arbitrage_free([lower, body, upper], SPOT))
+    assert 770.0 not in survivors and 765.0 not in survivors
