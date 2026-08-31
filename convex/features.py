@@ -14,12 +14,17 @@ The features follow the research's specification:
                       downside, differenced. This is the highest-value feature
                       in the study, because realised skewness rather than
                       realised variance is what drives 0DTE payoffs
-  slopes              how fast the smile rises away from the money, up and down
+  slopes              how fast the smile rises away from the money, up and down,
+                      off volatilities solved from the mid rather than read off
+                      the snapshot, because on expiration day there is nothing
+                      to read and because the training rows were solved too
   lagged moments      yesterday's realised variance, skewness and return
   lagged results      each family's own last result, its five-day mean and its
                       five-day dispersion
   exposure proxies    open-interest and gamma weighted notional either side,
-                      and the normalised balance between them
+                      and the normalised balance between them. Present only
+                      when the snapshot carries Greeks and open interest, which
+                      Alpaca does not publish on an expiring contract
   liquidity           half-spread, displayed depth, relative spread, tightness
 
 One honesty note that belongs in the write-up as much as in this docstring: the
@@ -39,6 +44,7 @@ import numpy as np
 
 from convex.errors import DataError
 from convex.instruments import ChainEntry, Right
+from convex.volatility import implied_volatility
 
 SECONDS_PER_YEAR = 365.0 * 24.0 * 3600.0
 
@@ -115,6 +121,17 @@ def integrated_variance(rows: Sequence[ChainEntry], spot: float, tau: float) -> 
             raise DataError(f"{row.contract.symbol}: non-positive strike {strike}")
         total += (width / strike**2) * row.quote.mid
     return (2.0 / tau) * total
+
+
+def chain_carries_greeks(rows: Iterable[ChainEntry]) -> bool:
+    """Whether every row came back with Greeks and open interest.
+
+    Alpaca publishes neither on expiration day, which is the only day this
+    project trades, so on a live 0DTE chain this is False and the exposure
+    features are absent from the row rather than guessed at. It is True on
+    every other expiry and on a rebuilt session that kept its book.
+    """
+    return all(row.greeks is not None and row.open_interest is not None for row in rows)
 
 
 def gamma_exposure(rows: Iterable[ChainEntry], spot: float) -> tuple[float, float, float]:
@@ -254,8 +271,18 @@ def build(
     close: datetime,
     prior_returns: Sequence[float],
     family_pnl: dict[str, Sequence[float]],
+    *,
+    rate: float,
 ) -> FeatureSet:
-    """Assemble the full predictor row from one chain snapshot."""
+    """Assemble the full predictor row from one chain snapshot.
+
+    ``rate`` is the discount rate the smile slope solves against. It is passed
+    rather than defaulted because a number nobody chose is a number nobody can
+    audit, and the same rate has to reach the rebuild for the two to agree.
+    Its effect at 0DTE is immaterial and measured to be so: across the whole
+    plausible range, zero to ten percent, both slopes move by well under one
+    percent of their value. tests/test_features.py holds that measurement.
+    """
     tau = time_to_close_years(now, close)
     calls = _otm(chain, spot, Right.CALL)
     puts = _otm(chain, spot, Right.PUT)
@@ -267,19 +294,27 @@ def build(
 
     variance_up = integrated_variance(calls, spot, tau)
     variance_dn = integrated_variance(puts, spot, tau)
-    signed_gamma, absolute_gamma, gamma_balance = gamma_exposure(chain, spot)
 
     values: dict[str, float] = {
         "iv_total": variance_up + variance_dn,
         "iv_up": variance_up,
         "iv_dn": variance_dn,
         "implied_skew": variance_up - variance_dn,
-        "slope_up": _smile_slope(calls, spot),
-        "slope_dn": _smile_slope(puts, spot),
-        "gex_signed": signed_gamma,
-        "gex_absolute": absolute_gamma,
-        "gex_balance": gamma_balance,
+        "slope_up": _smile_slope(calls, spot, tau, rate),
+        "slope_dn": _smile_slope(puts, spot, tau, rate),
     }
+    # Absent, not zeroed, and absent on exactly the days the exposure cannot be
+    # seen. Alpaca serves no Greeks and no open interest on an expiring
+    # contract, so on a live 0DTE chain these three keys do not appear and
+    # anything that genuinely needs one fails loudly at FeatureSet.vector
+    # rather than reading a fabricated zero. No fitted model asks for them:
+    # training.UNRECONSTRUCTABLE_FEATURES already excludes gex_balance, because
+    # a rebuilt session cannot supply it either.
+    if chain_carries_greeks(chain):
+        signed_gamma, absolute_gamma, gamma_balance = gamma_exposure(chain, spot)
+        values["gex_signed"] = signed_gamma
+        values["gex_absolute"] = absolute_gamma
+        values["gex_balance"] = gamma_balance
     values.update(liquidity_features(chain))
     values.update(
         tape_features([(row.contract.right, row.volume) for row in chain])
@@ -292,14 +327,33 @@ def build(
     return FeatureSet(taken_at=now, spot=spot, time_to_close_years=tau, values=values)
 
 
-def _smile_slope(rows: Sequence[ChainEntry], spot: float) -> float:
-    """Least-squares slope of implied volatility against log-moneyness."""
-    usable = [row for row in rows if row.greeks is not None]
-    if len(usable) < 3:
-        raise DataError(
-            f"smile slope needs at least three contracts with Greeks, found {len(usable)}"
+def _smile_slope(rows: Sequence[ChainEntry], spot: float, tau: float, rate: float) -> float:
+    """Least-squares slope of implied volatility against log-moneyness.
+
+    The volatility is solved out of the mid rather than read off the snapshot.
+    That is not a fallback for expiration day, it is the definition: every
+    training row was solved this way through convex.reconstruct, and reading a
+    vendor's volatility here would fit a model on one quantity and serve it
+    another. See convex.volatility.
+
+    A strike whose mid does not solve contributes nothing rather than a zero,
+    which would drag the slope toward the money.
+    """
+    solved = [
+        (math.log(row.contract.strike / spot), vol)
+        for row in rows
+        if (
+            vol := implied_volatility(
+                row.quote.mid, spot, row.contract.strike, row.contract.right, tau, rate
+            )
         )
-    moneyness = np.array([math.log(row.contract.strike / spot) for row in usable])
-    vols = np.array([row.require_greeks().implied_volatility for row in usable])
+        is not None
+    ]
+    if len(solved) < 3:
+        raise DataError(
+            f"smile slope needs three solved volatilities, found {len(solved)}"
+        )
+    moneyness = np.array([point[0] for point in solved])
+    vols = np.array([point[1] for point in solved], dtype=float)
     slope, _ = np.polyfit(moneyness, vols, 1)
     return float(slope)

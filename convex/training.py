@@ -177,12 +177,23 @@ def build_samples(
     across; one reproduces labelling the exact trade. See the note at the
     labelling step for why a rebuilt chain may want more than one.
 
-    ``build_features`` defaults to the live feature engine. A rebuilt session
-    has no Greeks and no book, so the backfill passes its own builder rather
-    than fabricating them; the lagged per-family results still accumulate here,
-    in session order, which is why this is a function and not a table of rows.
+    ``build_features`` defaults to the live feature engine, solving against the
+    configured rate. A rebuilt session has no Greeks and no book, so the
+    backfill passes its own builder rather than fabricating them; the lagged
+    per-family results still accumulate here, in session order, which is why
+    this is a function and not a table of rows.
     """
-    build_features = build_features or feature_engine.build
+    if build_features is None:
+        # Bound here rather than defaulted inside the engine: the rate the live
+        # row solves its smile against has to be the one the rebuild used, and
+        # the only place that knows both is the configuration.
+        solve_rate = config.float_("reconstruction.risk_free_rate")
+
+        def build_features(entries, spot, taken_at, close_at, prior_returns, family_pnl):
+            return feature_engine.build(
+                entries, spot, taken_at, close_at, prior_returns, family_pnl, rate=solve_rate
+            )
+
     if not snapshots:
         return []
     cost_model = CostModel.from_config(config)

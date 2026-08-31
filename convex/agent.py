@@ -235,7 +235,13 @@ class Agent:
         chain = self._chain(spot, expiries[0])
         archived = self._archive(chain, spot, now, expiries[0], cycle_id)
         snapshot = feature_engine.build(
-            chain, spot, now, session_close, prior_returns, family_pnl
+            chain,
+            spot,
+            now,
+            session_close,
+            prior_returns,
+            family_pnl,
+            rate=self.config.float_("reconstruction.risk_free_rate"),
         )
         self.ledger.append(
             Record(
