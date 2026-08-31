@@ -1,0 +1,45 @@
+# The assignment guard, kept alive independently of whoever started it.
+#
+# SPY is physically settled, so an in-the-money leg left alone at the close
+# becomes a hundred shares per contract overnight. On 31 August seven long
+# straddle contracts were open, which is seven hundred shares and about half a
+# million dollars against a hundred thousand dollar account. The guard is the
+# only thing between the two, and it was running as a foreground process
+# attached to a terminal, which is not a guard.
+#
+# It exits cleanly when the market is shut. Restarting it on a timer rather
+# than keeping it spinning means the account is watched through every minute of
+# every session without polling a closed book all night.
+#
+# Install with:
+#   sudo cp deploy/convex-manager.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now convex-manager
+
+[Unit]
+Description=CONVEX assignment guard and position manager
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/convex
+Environment=HOME=/home/ubuntu
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/home/ubuntu/convex/.venv/bin/python -m scripts.manage
+# Always, not on-failure. A clean exit means the market shut, and the next
+# session needs it back. Five minutes is short against a 30 minute guard
+# window and long enough not to hammer a closed market.
+Restart=always
+RestartSec=300
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/home/ubuntu/convex/data
+# Read-only rather than off: this one does hold credentials, because closing a
+# position is a write to the account, and .env is what carries them.
+ProtectHome=read-only
+
+[Install]
+WantedBy=multi-user.target

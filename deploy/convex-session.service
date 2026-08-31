@@ -1,0 +1,33 @@
+# The trading day, start to finish, without anyone at a keyboard.
+#
+# Calibration first, then the cycle, in that order and only in that order: the
+# cycle stands down on an unmeasured liquidity threshold, and calibration is
+# what measures it against a book that is actually quoting. If calibration
+# refuses, which it does on a shut market or a book too thin to measure, it
+# exits non-zero and the cycle does not run. That is the correct outcome and
+# not a failure to alert on: a session that cannot measure its costs is a
+# session that should not trade.
+#
+# Install with:
+#   sudo cp deploy/convex-session.service deploy/convex-session.timer /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now convex-session.timer
+
+[Unit]
+Description=CONVEX calibration and decision cycle
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=ubuntu
+WorkingDirectory=/home/ubuntu/convex
+Environment=HOME=/home/ubuntu
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/home/ubuntu/convex/.venv/bin/python -m scripts.calibrate_costs --write
+ExecStart=/home/ubuntu/convex/.venv/bin/python -m scripts.run_cycle
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/home/ubuntu/convex/data /home/ubuntu/convex/config /home/ubuntu/convex/docs
+ProtectHome=read-only

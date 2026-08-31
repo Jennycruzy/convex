@@ -1,0 +1,28 @@
+# Write each structure's expiry result into the ledger, after the close.
+#
+# Settlement is not bookkeeping. The lagged per-family results are features the
+# next session reads, so a day that never settles is a day the agent cannot
+# learn from, and the realised equity curve on the dashboard stays empty.
+#
+# Install with:
+#   sudo cp deploy/convex-settle.service deploy/convex-settle.timer /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now convex-settle.timer
+
+[Unit]
+Description=CONVEX post-close settlement
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=ubuntu
+WorkingDirectory=/home/ubuntu/convex
+Environment=HOME=/home/ubuntu
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/home/ubuntu/convex/.venv/bin/python -m scripts.manage --settle
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/home/ubuntu/convex/data
+ProtectHome=read-only

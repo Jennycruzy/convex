@@ -88,6 +88,8 @@ def main() -> int:
         report = manager.review(now, session.close_at)
         minutes = (session.close_at - now).total_seconds() / 60.0
         print(f"{now:%H:%M:%S}  {minutes:5.1f}m to close  {report.reason}")
+        for cancelled in report.cancelled:
+            print(f"    cancelled working order {cancelled['client_order_id']}")
         for closed in report.closed:
             print(f"    closed {closed['symbol']} as {closed['order_id']}")
         for failure in report.failed:

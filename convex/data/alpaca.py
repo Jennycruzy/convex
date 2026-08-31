@@ -643,6 +643,27 @@ class AlpacaGateway:
     def order(self, order_id: str) -> OrderRecord:
         return _order_record(self._client.call("get_order_by_id", {"order_id": order_id}))
 
+    def open_orders(self) -> list[OrderRecord]:
+        """Orders Alpaca is still working, oldest first.
+
+        A resting limit order is a position the account has not taken yet. It
+        has to be visible to the guard, because an order that fills inside the
+        assignment window opens exactly what the window exists to empty.
+        """
+        raw = self._client.call("get_orders", {"status": "open", "limit": 500})
+        if not isinstance(raw, list):
+            raise DataError(f"get_orders returned {type(raw).__name__}, not a list")
+        return [_order_record(row) for row in raw]
+
+    def cancel_order(self, order_id: str) -> None:
+        """Cancel one working order.
+
+        Unlike every other write in this class this one is safe to retry: a
+        cancel that already happened is not a second cancel, where a resent
+        order is a second position.
+        """
+        self._client.call("cancel_order_by_id", {"order_id": order_id})
+
     def positions(self) -> list[PositionRecord]:
         raw = self._client.call("get_all_positions")
         if not isinstance(raw, list):

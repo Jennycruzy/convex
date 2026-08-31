@@ -34,7 +34,7 @@ from enum import StrEnum
 from typing import Sequence
 
 from convex.config import Config
-from convex.errors import DataError, ExecutionError
+from convex.errors import ConvexError, DataError, ExecutionError
 from convex.instruments import OptionContract, Quote, parse_occ_symbol
 from convex.ledger import Action, Ledger, Record, new_cycle_id
 
@@ -98,13 +98,14 @@ class ManagerReport:
     cycle_id: str
     triggers: list[Trigger] = field(default_factory=list)
     closed: list[dict] = field(default_factory=list)
+    cancelled: list[dict] = field(default_factory=list)
     failed: list[dict] = field(default_factory=list)
     left_open: list[str] = field(default_factory=list)
     reason: str = "nothing to do"
 
     @property
     def acted(self) -> bool:
-        return bool(self.closed or self.failed)
+        return bool(self.closed or self.cancelled or self.failed)
 
 
 def read_positions(raw_positions: Sequence, underlying: str, multiplier: int) -> list[OpenLeg]:
@@ -215,18 +216,61 @@ class PositionManager:
 
     # ------------------------------------------------------------------- review
 
+    def _cancel_working_orders(self, report: ManagerReport) -> None:
+        """Pull any order still resting once a closing trigger has fired.
+
+        An unfilled limit order is a position the account has not taken yet,
+        and one that fills inside the assignment window opens exactly what the
+        window exists to empty. Nothing else in the system would notice: the
+        cycle sends an order and never looks at it again, and the guard reads
+        positions, which a working order is not.
+
+        This runs before the positions are read, so it happens whether or not
+        anything is currently open.
+        """
+        for order in self.gateway.open_orders():
+            try:
+                self.gateway.cancel_order(order.id)
+            except ConvexError as error:
+                report.failed.append({"symbol": order.client_order_id, "error": str(error)})
+                continue
+            report.cancelled.append(
+                {"order_id": order.id, "client_order_id": order.client_order_id}
+            )
+        if report.cancelled:
+            self.ledger.append(
+                Record(
+                    action=Action.ORDER_REJECTED,
+                    cycle_id=report.cycle_id,
+                    rationale=(
+                        f"Cancelled {len(report.cancelled)} working order(s) on "
+                        + ", ".join(str(trigger) for trigger in report.triggers)
+                        + ". An order that fills inside the guard window opens a "
+                        "position the window exists to empty."
+                    ),
+                    reject_reason=str(report.triggers[0]),
+                    extra={"cancelled": report.cancelled},
+                )
+            )
+
     def review(self, now: datetime, session_close: datetime) -> ManagerReport:
         """One pass: read the account, decide, close what has to be closed."""
         report = ManagerReport(cycle_id=new_cycle_id())
 
-        legs = read_positions(self.gateway.positions(), self.symbol, self.multiplier)
-        if not legs:
-            report.reason = "no open option positions"
-            return report
-
         account = self.gateway.account()
         spot, _ = self.gateway.spot(self.symbol)
         report.triggers = self._triggers(now, session_close, account.day_pnl_pct)
+        if report.triggers:
+            self._cancel_working_orders(report)
+
+        legs = read_positions(self.gateway.positions(), self.symbol, self.multiplier)
+        if not legs:
+            report.reason = (
+                f"no open option positions, {len(report.cancelled)} order(s) cancelled"
+                if report.cancelled
+                else "no open option positions"
+            )
+            return report
 
         pin_band = spot * self.config.float_("session.pin_band_pct")
         targets = legs_to_close(legs, report.triggers, spot, pin_band)

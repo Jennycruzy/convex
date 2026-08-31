@@ -1,0 +1,13 @@
+# 16:15 New York, which is fifteen minutes after the close. The settlement
+# price is read from the minute bars rather than remembered, and the last bar
+# of the session has to have landed before it can be.
+
+[Unit]
+Description=Settle CONVEX positions after the close
+
+[Timer]
+OnCalendar=Mon-Fri 16:15 America/New_York
+Persistent=true
+
+[Install]
+WantedBy=timers.target

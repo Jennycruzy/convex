@@ -1,0 +1,16 @@
+# 09:40 New York. Calibration measures the open book, then the cycle enters at
+# the research's 10:00 specification. The two run back to back rather than on
+# separate timers so the cycle can never run on a calibration that refused.
+#
+# Nothing here checks whether the market is open. Alpaca's calendar does, in
+# both scripts, and a holiday stands the session down with a receipt.
+
+[Unit]
+Description=Run the CONVEX session on the research entry
+
+[Timer]
+OnCalendar=Mon-Fri 09:40 America/New_York
+Persistent=false
+
+[Install]
+WantedBy=timers.target
