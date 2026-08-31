@@ -32,6 +32,11 @@ class Action(StrEnum):
     CANDIDATE_PRICED = "candidate_priced"
     CANDIDATE_REJECTED = "candidate_rejected"
     STAND_DOWN = "stand_down"
+    # A priced structure that cleared every check and was deliberately not
+    # sent. It carries the same rationale and the same checks as a live entry,
+    # so a dry run proves the path without leaving a record of an order that
+    # does not exist.
+    DRY_RUN = "dry_run"
     ORDER_SUBMITTED = "order_submitted"
     ORDER_FILLED = "order_filled"
     ORDER_REJECTED = "order_rejected"

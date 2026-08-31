@@ -40,6 +40,8 @@ from convex.errors import DataError
 # trade at the entry time, so it cannot contribute an entry-to-close return.
 _MAX_ENTRY_BAR_STALENESS_MINUTES = 5
 
+SECONDS_PER_YEAR = 365.0 * 24.0 * 3600.0
+
 
 @dataclass(frozen=True)
 class ScenarioSet:
@@ -79,19 +81,45 @@ class ScenarioSet:
             raise DataError("scenario returns have zero dispersion")
         return float(np.mean(centred**3) / sigma**3)
 
-    def annualised_variance(self, tau: float) -> np.ndarray:
+    @property
+    def session_tau(self) -> float:
+        """The span these returns actually cover, in years.
+
+        Entry to close on one session. Every return in the set is measured over
+        this window, so it is the only horizon they can honestly be annualised
+        against.
+        """
+        span = (
+            datetime.combine(date.min, self.exit_time)
+            - datetime.combine(date.min, self.entry_time)
+        ).total_seconds()
+        if span <= 0.0:
+            raise DataError(
+                f"the scenario window runs from {self.entry_time} to {self.exit_time}, "
+                "which is not a positive span"
+            )
+        return span / SECONDS_PER_YEAR
+
+    def annualised_variance(self) -> np.ndarray:
         """Each session's realised variance, annualised to match implied units.
 
         The regime rule compares today's implied variance against a history of
         variance readings. Recorded implied variance is the natural comparison
         but does not exist until the agent has run for weeks, so the comparison
-        is made against realised session variance over the same clock, scaled
-        by the same tau the implied figure uses. The gap between the two is the
-        variance risk premium, which is exactly what a regime call is about.
+        is made against realised session variance, annualised so the two are
+        rates over the same clock. The gap between them is the variance risk
+        premium, which is exactly what a regime call is about.
+
+        The horizon is this set's own window and not the caller's remaining
+        time to the close. Those coincide at the 10:00 entry the project trades
+        and nowhere else, and passing the live one silently rescaled the whole
+        history by the ratio between them: at 13:22 on 31 August it inflated
+        every reading by about two and a third, which moved today's implied
+        variance from the 61st percentile of its own history down to the 44th
+        and turned a high-variance regime into no view at all. The rule was
+        reading the clock rather than the market.
         """
-        if tau <= 0.0:
-            raise DataError(f"tau must be positive to annualise variance, found {tau}")
-        return (self.log_returns**2) / tau
+        return (self.log_returns**2) / self.session_tau
 
     def prices(self, spot: float) -> np.ndarray:
         """Terminal underlying prices implied by each scenario."""

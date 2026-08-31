@@ -15,7 +15,6 @@ from convex.classifier import load_models
 from convex.errors import ConvexError
 from convex.ledger import Action, Ledger
 from convex.scenarios import build as build_scenarios
-from convex.features import time_to_close_years
 from scripts.run_cycle import DryRunGateway, family_results
 from tests.integration.conftest import needs_account
 
@@ -32,7 +31,6 @@ def test_a_full_cycle_reaches_a_decision_and_records_every_verdict(
     sessions = gateway.sessions(now.date(), now.date())
     if not sessions:
         pytest.skip(f"no session on {now.date()}; a cycle cannot run")
-    tau = time_to_close_years(now, sessions[0].close_at)
 
     models, _ = load_models(config.path_("paths.models"), config)
     print(f"  {len(models)} fitted model(s); the rest use the documented rule")
@@ -48,7 +46,7 @@ def test_a_full_cycle_reaches_a_decision_and_records_every_verdict(
     try:
         result = agent.run_cycle(
             prior_returns=scenarios.log_returns.tolist(),
-            variance_history=scenarios.annualised_variance(tau).tolist(),
+            variance_history=scenarios.annualised_variance().tolist(),
             family_pnl=family_results(ledger),
         )
     except ConvexError as error:
