@@ -26,9 +26,39 @@ BY = "scripts/calibrate_costs.py"
 KEY = "liquidity.max_relative_spread"
 
 
+def _as_hypothesis(text: str, key: str) -> str:
+    """The real file, with ``key`` put back to the state a measurement starts from.
+
+    Reading the live configuration is the point of this test: it checks the
+    rewrite against the file's actual comments and layout rather than a
+    hand-built sample that would drift away from it. But the starting state has
+    to be forced. These tests used to rely on the threshold happening to be
+    unmeasured, and the first real calibration on 31 August measured it and
+    broke all six of them at once, which is a fixture reporting on the calendar
+    rather than on the code.
+    """
+    _, _, name = key.rpartition(".")
+    lines = text.splitlines()
+    for index, line in enumerate(lines):
+        if line.strip().startswith(f"{name}:"):
+            value, _, _ = line.partition("#")
+            lines[index] = f"{value.rstrip()}       # HYPOTHESIS until measured"
+            break
+    else:
+        raise AssertionError(f"{key} is not in the configuration any more")
+    for index, line in enumerate(lines):
+        if line.strip() == "hypothesis:":
+            lines.insert(index + 1, f"    - {key}")
+            break
+    else:
+        raise AssertionError("provenance.hypothesis is not in the configuration any more")
+    return "\n".join(lines) + "\n"
+
+
 @pytest.fixture
 def original() -> str:
-    return (Path(__file__).resolve().parent.parent / "config" / "convex.yaml").read_text()
+    text = (Path(__file__).resolve().parent.parent / "config" / "convex.yaml").read_text()
+    return _as_hypothesis(text, KEY)
 
 
 def measure(text: str, value: float = 0.0731, key: str = KEY) -> str:

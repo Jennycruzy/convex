@@ -62,6 +62,29 @@ def measured(config):
 
 
 @pytest.fixture
+def unmeasured(config):
+    """The configuration as it stands before a session has measured anything.
+
+    Built rather than read. This used to be the shipped state of the file, so
+    the test below read it straight off disk and passed; the first real
+    calibration on 31 August wrote the threshold and cleared it from the
+    blocking list, and the test broke on a working measurement. What is under
+    test is the check, not which keys happen to be outstanding today.
+    """
+    return type(config)(
+        path=config.path,
+        loaded_mtime=config.loaded_mtime,
+        values={
+            **config.values,
+            "provenance": {
+                **config.values["provenance"],
+                "hypothesis": ["liquidity.max_relative_spread"],
+            },
+        },
+    )
+
+
+@pytest.fixture
 def scenarios():
     grid = np.linspace(-0.02, 0.015, 200)
     return ScenarioSet(
@@ -375,15 +398,15 @@ def test_a_hypothesis_naming_a_key_that_does_not_exist_raises(config):
 
 
 def test_the_session_stands_down_while_a_cost_input_is_still_unmeasured(
-    config, tmp_path
+    unmeasured, tmp_path
 ):
-    """Shipped state: the liquidity threshold has never been measured.
+    """An unmeasured liquidity threshold stops the session.
 
     It blocks and the fee bounds do not, which is the whole point of the split.
     A threshold that is too permissive lets a bad leg through; a fee set above
     what it can be only refuses a candidate that was marginal anyway.
     """
-    report = run_session_gates(context(config, tmp_path))
+    report = run_session_gates(context(unmeasured, tmp_path))
     failure = report.first_failure
     assert failure is not None
     assert failure.name == "calibration"

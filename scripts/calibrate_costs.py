@@ -49,8 +49,8 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 # The one checked input a chain snapshot can settle on its own.
 MEASURED_KEY = "liquidity.max_relative_spread"
 
-# Below this many quoted legs a p90 is three contracts and a rounding error, so
-# the run reports and refuses rather than writing a threshold off it.
+# Below this many quoted legs a median is three contracts and a rounding error,
+# so the run reports and refuses rather than writing a threshold off it.
 MINIMUM_LEGS = 40
 
 
@@ -160,7 +160,17 @@ def main() -> int:
     _write_note(measured)
     print(f"\nwritten to the ledger and to docs/calibration-{datetime.now(timezone.utc):%Y-%m-%d}.md")
 
-    threshold = _quantile(leg_relative, 0.9)
+    # The median, not the p90. A threshold set at the ninetieth percentile
+    # admits ninety percent of the legs it measured, which describes the book
+    # instead of constraining it: on 31 August the p90 was 200% and the value
+    # it proposed rejected nothing at all. tests/test_gates.py caught that,
+    # with 1551 of 1551 candidates surviving a check that is supposed to bind.
+    #
+    # This threshold is not the profitability test and was never meant to be.
+    # Cost is priced into every candidate before ranking, so a structure that
+    # cannot pay for its own execution is already last. What this rejects is a
+    # leg whose book is not a market: wider than the typical leg in the band.
+    threshold = _quantile(leg_relative, 0.5)
     if not arguments.write:
         print(f"\nmeasured  {MEASURED_KEY}: {threshold:.4f}")
         print("re-run with --write to put it in the configuration")
@@ -185,8 +195,8 @@ def _apply(config, ledger, threshold: float, legs: int, market_open: bool, measu
         return 2
     if legs < MINIMUM_LEGS:
         print(
-            f"\nrefusing to write: {legs} quoted legs is too few for a p90 to mean "
-            f"anything (wanted {MINIMUM_LEGS})."
+            f"\nrefusing to write: {legs} quoted legs is too few for a median to "
+            f"mean anything (wanted {MINIMUM_LEGS})."
         )
         return 2
 
