@@ -36,7 +36,7 @@ from convex.config import Config
 from convex.costs import CostModel
 from convex.data.alpaca import AlpacaGateway
 from convex.edge import EdgeEstimate, evaluate
-from convex.errors import ConvexError, DataError
+from convex.errors import ConvexError, DataError, UndefinedRiskError
 from convex.gates import GateContext, GateReport, run_candidate_gates, run_session_gates
 from convex.instruments import ChainEntry
 from convex.ledger import Action, Ledger, Record, new_cycle_id
@@ -107,6 +107,7 @@ class Agent:
         scenarios: ScenarioSet,
         models: dict[Family, StructureModel] | None = None,
         submission_cutoff: datetime | None = None,
+        dry_run: bool = False,
     ) -> None:
         self.gateway = gateway
         self.config = config
@@ -116,6 +117,8 @@ class Agent:
         self.cost_model = CostModel.from_config(config)
         self.rule = RegimeRule()
         self.submission_cutoff = submission_cutoff
+        self.dry_run = dry_run
+        self.max_attempts = config.int_("candidates.max_ranked_attempts")
         self.zone = ZoneInfo(config.str_("session.timezone"))
 
     # ------------------------------------------------------------------ inputs
@@ -262,43 +265,119 @@ class Agent:
 
         for family, candidates in build_candidates(chain, self.config, spot).items():
             probability, source = self._probability(family, snapshot, variance_history)
-            priced = [
-                PricedCandidate(
-                    candidate,
-                    evaluate(
+            # Priced one at a time rather than in a comprehension, because a
+            # live chain is a set of prints from different moments and a few of
+            # them cross. A structure built across a crossed pair shows a profit
+            # at every expiry price, which is a stale quote and not free money,
+            # and Law 5 refuses to compute a risk for it. That refusal is about
+            # the one structure. Pricing the family inside a single expression
+            # let it end the family, and on 31 August it ended the session.
+            priced: list[PricedCandidate] = []
+            unpriceable: list[str] = []
+            for candidate in candidates:
+                try:
+                    estimate = evaluate(
                         candidate.legs,
                         self.scenarios,
                         self.cost_model,
                         spot,
                         1,
                         self.config.float_("risk.es_confidence"),
-                    ),
+                    )
+                except UndefinedRiskError as error:
+                    unpriceable.append(f"{candidate.description}: {error}")
+                    continue
+                priced.append(PricedCandidate(candidate, estimate))
+
+            if unpriceable:
+                self.ledger.append(
+                    Record(
+                        action=Action.CANDIDATE_REJECTED,
+                        cycle_id=cycle_id,
+                        structure=str(family),
+                        rationale=(
+                            f"{len(unpriceable)} of {len(candidates)} {family} structures "
+                            "carry quotes that do not describe a risk and were not priced. "
+                            "First: " + unpriceable[0]
+                        ),
+                        reject_reason="undefined_risk",
+                        extra={"unpriceable": unpriceable[:10]},
+                    )
                 )
-                for candidate in candidates
-            ]
             ordered = rank(priced, [str(name) for name in self.config.list_("structures.tie_break_order")])
             if not ordered:
                 continue
 
-            best = ordered[0]
+            # Walk the ranking rather than standing or falling on its head.
+            # Every candidate here still has to clear every check on its own,
+            # so this loosens nothing: it stops one wide wing on the top-ranked
+            # structure from taking the whole family down with it when the
+            # structure ranked behind it is tradeable and nearly as good. The
+            # ranking is already net of cost, so the first one that clears is
+            # the best tradeable structure in the family by construction.
             portfolio = PortfolioState(
                 equity=context.equity,
                 buying_power=context.buying_power,
                 open_structures=context.open_structures + opened,
                 es_in_use=es_in_use,
             )
-            size = size_position(best.estimate, portfolio, self.config)
             candidate_context = replace(
                 context,
                 probability=probability,
                 es_in_use=es_in_use,
                 open_structures=context.open_structures + opened,
             )
-            report = run_candidate_gates(candidate_context, best.candidate, best.estimate, size)
 
-            if not report.passed or not size.trades:
+            best = None
+            first = first_size = first_report = None
+            unsizable: list[str] = []
+            for attempt, priced_candidate in enumerate(ordered[: self.max_attempts]):
+                try:
+                    size = size_position(priced_candidate.estimate, portfolio, self.config)
+                except UndefinedRiskError as error:
+                    # A structure whose risk cannot be computed is not sized, by
+                    # Law 5, and one that shows a profit at every expiry price is
+                    # a crossed or stale quote rather than free money. Skipping it
+                    # is not swallowing the error: it is recorded below, and the
+                    # candidate is refused rather than the session abandoned. The
+                    # live chain is a set of prints from different moments and
+                    # always contains a few of these.
+                    unsizable.append(f"{priced_candidate.candidate.description}: {error}")
+                    continue
+                report = run_candidate_gates(
+                    candidate_context, priced_candidate.candidate, priced_candidate.estimate, size
+                )
+                if report.passed and size.trades:
+                    best = priced_candidate
+                    break
+                # Only the best refusal is written down. Recording a rejection
+                # for every structure the ranking walked past would bury the
+                # decision in its own arithmetic, and the receipt that matters
+                # is why the family's best structure could not be opened.
+                if attempt == 0:
+                    first_size, first_report, first = size, report, priced_candidate
+
+            if unsizable:
+                self.ledger.append(
+                    Record(
+                        action=Action.CANDIDATE_REJECTED,
+                        cycle_id=cycle_id,
+                        structure=str(family),
+                        rationale=(
+                            f"{len(unsizable)} of the {len(ordered[: self.max_attempts])} "
+                            f"ranked {family} structures could not be sized because their "
+                            "quotes do not describe a risk. First: " + unsizable[0]
+                        ),
+                        reject_reason="undefined_risk",
+                        extra={"unsizable": unsizable[:10]},
+                    )
+                )
+
+            if best is None:
+                if first is None:
+                    continue
                 self._record_rejection(
-                    cycle_id, family, best, size, report, probability, source, result
+                    cycle_id, family, first, first_size, first_report, probability, source, result
                 )
                 continue
 
@@ -375,10 +454,13 @@ class Agent:
         limit_price = round(best.estimate.profile.net_entry_debit, 2)
         client_order_id = f"convex-{cycle_id}-{family}"[:48]
 
-        # The rationale is durable before the order exists, never after.
+        # The rationale is durable before the order exists, never after. On a
+        # dry run the order never comes to exist, so the action says so: a
+        # rehearsal that wrote order_submitted would put an order in the
+        # evidence that was never sent, and the ledger is the evidence.
         self.ledger.append(
             Record(
-                action=Action.ORDER_SUBMITTED,
+                action=Action.DRY_RUN if self.dry_run else Action.ORDER_SUBMITTED,
                 cycle_id=cycle_id,
                 structure=str(family),
                 rationale=rationale.text,
@@ -399,6 +481,13 @@ class Agent:
                 },
             )
         )
+
+        if self.dry_run:
+            result.stood_down = False
+            result.orders.append(
+                {"family": str(family), "order_id": f"not sent, {client_order_id}"}
+            )
+            return
 
         order = self.gateway.submit_structure(
             list(best.candidate.legs), size.contracts, limit_price, client_order_id

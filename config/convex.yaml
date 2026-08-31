@@ -24,7 +24,6 @@ provenance:
   # Could be wrong in the dangerous direction. The agent will not open a
   # position while any of these is listed.
   hypothesis:
-    - liquidity.max_relative_spread
     - reconstruction.risk_free_rate
 
   # Set high on purpose, pending measurement. None of these can be measured
@@ -71,6 +70,12 @@ candidates:
   moneyness_high: 1.02
   min_wing_width_pct: 0.002         # narrowest wing worth trading, fraction of spot
   max_wing_width_pct: 0.020
+  # How far down its own ranking a family may look for a structure that clears
+  # every check. Each one still has to clear all of them, so this is not a
+  # loosening: it stops one wide leg on the best-ranked structure from taking
+  # the family down when the one behind it is tradeable. Bounded because the
+  # ranking is net of cost and the tail of it is not worth opening.
+  max_ranked_attempts: 25
   max_candidates_per_structure: 400
 
 costs:
@@ -87,7 +92,7 @@ costs:
   exit_reserve_legs: short          # legs assumed to need closing: short | all | none
 
 liquidity:
-  max_relative_spread: 0.25         # HYPOTHESIS until measured: (ask-bid)/mid per leg
+  max_relative_spread: 0.1047       # MEASURED 2026-08-31 by scripts/calibrate_costs.py
   min_displayed_size: 1             # contracts on the touch
   max_quote_age_seconds: 30         # feature-staleness budget
 

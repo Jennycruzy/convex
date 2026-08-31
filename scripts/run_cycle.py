@@ -22,7 +22,6 @@ from convex.classifier import load_models
 from convex.config import load
 from convex.data.alpaca import AlpacaGateway
 from convex.errors import ConvexError
-from convex.features import time_to_close_years
 from convex.ledger import Action, Ledger, Record, new_cycle_id
 from convex.scenarios import build as build_scenarios
 from convex.scenarios import save as save_scenarios
@@ -97,7 +96,6 @@ def main() -> int:
         )
         print(f"no session on {now.date()}; nothing to do")
         return 0
-    tau = time_to_close_years(now, sessions[0].close_at)
 
     models, metadata = load_models(config.path_("paths.models"), config)
     if models:
@@ -110,17 +108,21 @@ def main() -> int:
         )
 
     agent = Agent(
+        # Both, on purpose. The flag makes the agent record a rehearsal as one
+        # instead of writing an order into the evidence, and the wrapper stays
+        # underneath it as the thing that physically cannot send.
         gateway=DryRunGateway(live) if arguments.dry_run else live,
         config=config,
         ledger=ledger,
         scenarios=scenarios,
         models=models,
         submission_cutoff=SUBMISSION_CUTOFF,
+        dry_run=arguments.dry_run,
     )
 
     result = agent.run_cycle(
         prior_returns=scenarios.log_returns.tolist(),
-        variance_history=scenarios.annualised_variance(tau).tolist(),
+        variance_history=scenarios.annualised_variance().tolist(),
         family_pnl=family_results(ledger),
     )
 
@@ -128,7 +130,8 @@ def main() -> int:
     for rejection in result.rejections:
         print(f"  refused {rejection['family']:<16} {rejection['reason']}: {rejection['detail']}")
     for order in result.orders:
-        print(f"  opened  {order['family']:<16} order {order['order_id']}")
+        verb = "would open" if arguments.dry_run else "opened  "
+        print(f"  {verb} {order['family']:<16} order {order['order_id']}")
     return 0
 
 
