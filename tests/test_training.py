@@ -107,9 +107,56 @@ def test_the_label_is_net_of_cost_not_gross():
     )
     assert samples
     for sample in samples:
-        # net_pnl is what the label is taken from, and it already has the
-        # execution cost subtracted.
-        assert sample.label == (1 if sample.net_pnl > 0 else 0)
+        # label_net_pnl is what the label is taken from, and it already has
+        # the execution cost subtracted.
+        assert sample.label == (1 if sample.label_net_pnl > 0 else 0)
+
+
+def test_labelling_one_candidate_leaves_the_two_triples_identical():
+    """With ``label_top_k`` at one there is nothing to take a median over, so
+    the label describes the very candidate the agent trades."""
+    config = load()
+    days = [date(2026, 8, 24) + timedelta(days=i) for i in range(3)]
+    samples = training.build_samples(
+        [snapshot(day) for day in days],
+        {day: 651.0 for day in days},
+        scenarios(),
+        config,
+        rank,
+        label_top_k=1,
+    )
+    assert samples
+    for sample in samples:
+        assert sample.label_gross_pnl == sample.traded_gross_pnl
+        assert sample.label_cost == sample.traded_cost
+        assert sample.label_net_pnl == sample.traded_net_pnl
+
+
+def test_shrinking_the_label_over_five_candidates_leaves_the_traded_result_alone():
+    """The median across the top few is shrinkage for the model's benefit. The
+    agent still opens the first ranked candidate, so the traded triple has to
+    come back unchanged from the run that labels across one."""
+    config = load()
+    days = [date(2026, 8, 24) + timedelta(days=i) for i in range(3)]
+    arguments = (
+        [snapshot(day) for day in days],
+        {day: 651.0 for day in days},
+        scenarios(),
+        config,
+        rank,
+    )
+    one = training.build_samples(*arguments, label_top_k=1)
+    five = training.build_samples(*arguments, label_top_k=5)
+    assert one and len(one) == len(five)
+
+    traded = lambda rows: [
+        (r.session_date, r.family, r.traded_gross_pnl, r.traded_cost, r.traded_net_pnl)
+        for r in rows
+    ]
+    assert traded(one) == traded(five)
+
+    # And the shrinkage did something, or this test proves nothing.
+    assert [r.label_net_pnl for r in one] != [r.label_net_pnl for r in five]
 
 
 def test_a_session_without_enough_history_behind_it_is_dropped_not_padded():

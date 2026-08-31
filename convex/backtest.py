@@ -19,6 +19,11 @@ Three arms are measured on the same sessions:
                      which is the arrangement the research found beat every
                      single structure it tested
 
+Every figure here reads a Sample's ``traded_`` triple, which is the candidate
+the ranking crowned and the agent would have opened. The ``label_`` triple is
+the median across the top few candidates and exists to teach the model; totting
+it up would report the earnings of a trade nobody places.
+
 Nothing here is annualised from a handful of sessions without saying so. With
 four trading days a Sharpe ratio is a number, not evidence, and the report
 carries the session count next to every figure so a reader can judge it.
@@ -203,9 +208,9 @@ def run(
 
         always = measure(
             "every session",
-            [row.gross_pnl for row in rows],
-            [row.net_pnl for row in rows],
-            [row.cost for row in rows],
+            [row.traded_gross_pnl for row in rows],
+            [row.traded_net_pnl for row in rows],
+            [row.traded_cost for row in rows],
             sessions=len(rows),
         )
 
@@ -216,17 +221,17 @@ def run(
         ]
         classified = measure(
             "classified",
-            [row.gross_pnl for row in taken],
-            [row.net_pnl for row in taken],
-            [row.cost for row in taken],
+            [row.traded_gross_pnl for row in taken],
+            [row.traded_net_pnl for row in taken],
+            [row.traded_cost for row in taken],
             sessions=len(rows),
         )
         report.per_family[str(family)] = {"every session": always, "classified": classified}
 
         for row in taken:
-            basket_gross[row.session_date] += row.gross_pnl
-            basket_net[row.session_date] += row.net_pnl
-            basket_cost[row.session_date] += row.cost
+            basket_gross[row.session_date] += row.traded_gross_pnl
+            basket_net[row.session_date] += row.traded_net_pnl
+            basket_cost[row.session_date] += row.traded_cost
 
     days = sorted(basket_net)
     report.basket["classified"] = measure(
@@ -242,9 +247,9 @@ def run(
     every_net: dict[date, float] = defaultdict(float)
     every_cost: dict[date, float] = defaultdict(float)
     for sample in samples:
-        every_gross[sample.session_date] += sample.gross_pnl
-        every_net[sample.session_date] += sample.net_pnl
-        every_cost[sample.session_date] += sample.cost
+        every_gross[sample.session_date] += sample.traded_gross_pnl
+        every_net[sample.session_date] += sample.traded_net_pnl
+        every_cost[sample.session_date] += sample.traded_cost
     report.basket["every session"] = measure(
         "basket, every session",
         [every_gross[day] for day in all_days],

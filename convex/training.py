@@ -103,25 +103,48 @@ def reconstructed_feature_names_for(family: Family) -> tuple[str, ...]:
 
 @dataclass(frozen=True)
 class Sample:
-    """One training row, kept with enough context to be audited."""
+    """One training row, kept with enough context to be audited.
+
+    Two sets of money, and keeping them apart is the whole point of the naming.
+
+    The ``label_`` figures are what the model is taught to recognise. Under
+    ``label_top_k`` above one they are the median across the top few ranked
+    candidates, which is deliberate shrinkage against the winner's curse on a
+    rebuilt chain. They describe a candidate nobody buys.
+
+    The ``traded_`` figures are what the agent would have earned, from the one
+    candidate the ranking actually crowns. Every statement about profit, in the
+    replay, the write-up or the gate that decides whether a model ships, is
+    about these and only these.
+
+    They were one triple named ``net_pnl`` once. The shrinkage meant for the
+    label reached the earnings that way, and the ship gate spent a run scoring
+    a trade the agent would never place.
+    """
 
     session_date: date
     family: Family
     features: dict[str, float]
     label: int
-    gross_pnl: float
-    cost: float
-    net_pnl: float
+    label_gross_pnl: float
+    label_cost: float
+    label_net_pnl: float
+    traded_gross_pnl: float
+    traded_cost: float
+    traded_net_pnl: float
     description: str
 
     @property
     def cost_share(self) -> float:
-        """What fraction of a positive gross result the execution took.
+        """What fraction of the traded gross result the execution took.
 
         Above one is the finding the project is built on: a structure that made
-        money before costs and lost after them.
+        money before costs and lost after them. It reads the traded figures
+        because it is a claim about the trade, not about the label.
         """
-        return self.cost / self.gross_pnl if self.gross_pnl > 0.0 else float("inf")
+        if self.traded_gross_pnl <= 0.0:
+            return float("inf")
+        return self.traded_cost / self.traded_gross_pnl
 
 
 def settlement_pnl_of(
@@ -263,11 +286,15 @@ def build_samples(
             gross = sorted(gross for gross, _ in outcomes)[len(outcomes) // 2]
             cost = sorted(cost for _, cost in outcomes)[len(outcomes) // 2]
 
-            # The family's own lagged results follow the trade, not the label,
-            # because that series is what the agent really earned.
-            traded_net = settlement_pnl_of(
+            # What the agent would really have earned: the crowned candidate,
+            # not the median of the few behind it. The family's own lagged
+            # results follow this series, and so does every figure downstream
+            # that claims to be money.
+            traded_gross = settlement_pnl_of(
                 best.candidate, best.estimate.profile.net_entry_debit, settlement
-            ) - best.estimate.cost.total
+            )
+            traded_cost = best.estimate.cost.total
+            traded_net = traded_gross - traded_cost
             history.setdefault(str(family), []).append(traded_net)
             samples.append(
                 Sample(
@@ -275,9 +302,12 @@ def build_samples(
                     family=family,
                     features=dict(row.values),
                     label=1 if net > 0.0 else 0,
-                    gross_pnl=round(gross, 2),
-                    cost=round(cost, 2),
-                    net_pnl=round(net, 2),
+                    label_gross_pnl=round(gross, 2),
+                    label_cost=round(cost, 2),
+                    label_net_pnl=round(net, 2),
+                    traded_gross_pnl=round(traded_gross, 2),
+                    traded_cost=round(traded_cost, 2),
+                    traded_net_pnl=round(traded_net, 2),
                     description=best.candidate.description,
                 )
             )

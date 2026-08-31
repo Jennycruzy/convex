@@ -21,15 +21,30 @@ from convex.training import Sample
 DAY = date(2026, 8, 3)
 
 
-def sample(offset: int, gross: float, cost: float, family=Family.PUT_BWB) -> Sample:
+def sample(
+    offset: int,
+    gross: float,
+    cost: float,
+    family=Family.PUT_BWB,
+    label_gross: float | None = None,
+    label_cost: float | None = None,
+) -> Sample:
+    """One row. ``gross`` and ``cost`` are the traded figures, which is what
+    the replay reads; the label triple defaults to matching them, as it does
+    when the labels are taken across a single candidate."""
+    label_gross = gross if label_gross is None else label_gross
+    label_cost = cost if label_cost is None else label_cost
     return Sample(
         session_date=DAY + timedelta(days=offset),
         family=family,
         features={},
-        label=1 if gross - cost > 0 else 0,
-        gross_pnl=gross,
-        cost=cost,
-        net_pnl=round(gross - cost, 2),
+        label=1 if label_gross - label_cost > 0 else 0,
+        label_gross_pnl=label_gross,
+        label_cost=label_cost,
+        label_net_pnl=round(label_gross - label_cost, 2),
+        traded_gross_pnl=gross,
+        traded_cost=cost,
+        traded_net_pnl=round(gross - cost, 2),
         description="test",
     )
 
@@ -98,6 +113,42 @@ def test_a_series_that_is_positive_gross_and_negative_net_is_reported_as_both():
     assert arm.net_sharpe < 0
     assert not arm.survives_costs
     assert arm.cost_share_of_gross > 1.0
+
+
+def test_the_replay_totals_the_traded_candidate_and_not_the_label():
+    """The regression this pair of triples exists to prevent.
+
+    Under ``label_top_k`` above one the label is the median across the top few
+    ranked candidates, which is a trade the agent never opens. Every number the
+    replay reports is money, so it reads the traded figures; totting up the
+    label would report the earnings of a candidate nobody bought.
+    """
+    # Traded makes 3.00 a session. The label, shrunk over five candidates,
+    # claims a 90.00 loss. Nothing about the second is the strategy's result.
+    rows = [
+        sample(index, gross=5.0, cost=2.0, label_gross=10.0, label_cost=100.0)
+        for index in range(6)
+    ]
+    arm = backtest.run(rows, probabilities={}).per_family[str(Family.PUT_BWB)]["every session"]
+
+    assert arm.net_total == pytest.approx(18.0)
+    assert arm.gross_total == pytest.approx(30.0)
+    assert arm.cost_total == pytest.approx(12.0)
+
+    basket = backtest.run(rows, probabilities={}).basket["every session"]
+    assert basket.net_total == pytest.approx(18.0)
+
+
+def test_the_classified_arm_also_earns_the_traded_result():
+    rows = [
+        sample(index, gross=5.0, cost=2.0, label_gross=10.0, label_cost=100.0)
+        for index in range(6)
+    ]
+    taken = {Family.PUT_BWB: {row.session_date: 0.9 for row in rows}}
+    report = backtest.run(rows, probabilities=taken)
+
+    assert report.per_family[str(Family.PUT_BWB)]["classified"].net_total == pytest.approx(18.0)
+    assert report.basket["classified"].net_total == pytest.approx(18.0)
 
 
 def test_cost_share_is_undefined_rather_than_negative_when_gross_lost_money():

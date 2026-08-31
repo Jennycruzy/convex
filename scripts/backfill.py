@@ -171,9 +171,14 @@ def main() -> int:
     for family in sorted(by_family):
         rows = by_family[family]
         wins = sum(row.label for row in rows)
-        gross = [row.gross_pnl for row in rows]
-        net = [row.net_pnl for row in rows]
-        eaten = sum(1 for row in rows if row.gross_pnl > 0.0 and row.net_pnl <= 0.0)
+        # The label's win rate describes what the model is taught. The money
+        # beside it describes what the agent would have earned, so it comes
+        # from the traded candidate rather than the median of the top few.
+        gross = [row.traded_gross_pnl for row in rows]
+        net = [row.traded_net_pnl for row in rows]
+        eaten = sum(
+            1 for row in rows if row.traded_gross_pnl > 0.0 and row.traded_net_pnl <= 0.0
+        )
         report[family] = {
             "sessions": len(rows),
             "win_rate_net": round(wins / len(rows), 4),
