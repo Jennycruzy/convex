@@ -37,6 +37,7 @@ from convex.costs import CostModel
 from convex.data.alpaca import AlpacaGateway
 from convex.edge import EdgeEstimate, evaluate
 from convex.errors import ConvexError, DataError, UndefinedRiskError
+from convex.execution import outcome_fields, resolve_order
 from convex.gates import GateContext, GateReport, run_candidate_gates, run_session_gates
 from convex.instruments import ChainEntry
 from convex.ledger import Action, Ledger, Record, new_cycle_id
@@ -193,6 +194,25 @@ class Agent:
         spot, _ = self.gateway.spot(symbol)
         session_close = self._session_close(now)
 
+        live_positions = self.gateway.positions()
+        if live_positions:
+            # A second session must not pretend its portfolio tail starts at
+            # zero. Until every existing option leg is attributed and closed,
+            # no new structure can be sized honestly.
+            reason = (
+                f"account has {len(live_positions)} open broker position(s); "
+                "new entries are blocked until the portfolio is flat"
+            )
+            self.ledger.append(
+                Record(
+                    action=Action.RISK_HALT,
+                    cycle_id=cycle_id,
+                    rationale=f"No cycle today: {reason}.",
+                    reject_reason="existing_positions",
+                )
+            )
+            return CycleResult(cycle_id, True, reason)
+
         context = GateContext(
             config=self.config,
             now_exchange=now,
@@ -201,9 +221,12 @@ class Agent:
             market_open=market_open,
             equity=account.equity,
             last_equity=account.last_equity,
-            buying_power=account.options_buying_power or account.buying_power,
+            # Options buying power is an explicit account constraint. Falling
+            # back to stock buying power turns an unavailable option limit into
+            # a made-up permission to trade.
+            buying_power=account.options_buying_power,
             spot=spot,
-            open_structures=len(self.gateway.positions()),
+            open_structures=0,
             es_in_use=0.0,
             cumulative_fees=self._fees_paid(),
             kill_switch_path=self.config.path_("paths.kill_switch"),
@@ -243,7 +266,10 @@ class Agent:
             now,
             session_close,
             prior_returns,
-            family_pnl,
+            {
+                str(name): list(family_pnl.get(str(name), []))
+                for name in self.config.list_("structures.enabled")
+            },
             rate=self.config.float_("reconstruction.risk_free_rate"),
         )
         self.ledger.append(
@@ -451,7 +477,11 @@ class Agent:
         )
         rationale = rationale_layer.narrate(brief, fallback)
 
-        limit_price = round(best.estimate.profile.net_entry_debit, 2)
+        # This is the entry limit, so it includes only entry friction. Max loss
+        # below still uses the all-in profile, including the assignment reserve.
+        limit_price = round(
+            self.cost_model.executable_debit(best.candidate.legs, size.contracts), 2
+        )
         client_order_id = f"convex-{cycle_id}-{family}"[:48]
 
         # The rationale is durable before the order exists, never after. On a
@@ -489,32 +519,117 @@ class Agent:
             )
             return
 
-        order = self.gateway.submit_structure(
-            list(best.candidate.legs), size.contracts, limit_price, client_order_id
-        )
+        try:
+            order = self.gateway.submit_structure(
+                list(best.candidate.legs), size.contracts, limit_price, client_order_id
+            )
+            resolution = resolve_order(
+                self.gateway,
+                order,
+                size.contracts,
+                timeout_seconds=self.config.float_("execution.order_status_timeout_seconds"),
+                poll_seconds=self.config.float_("execution.order_poll_seconds"),
+            )
+        except ConvexError as error:
+            self.ledger.append(
+                Record(
+                    action=Action.ORDER_REJECTED,
+                    cycle_id=cycle_id,
+                    structure=str(family),
+                    rationale=f"The entry could not be verified: {error}",
+                    contracts=size.contracts,
+                    reject_reason="entry_submission_failed",
+                    extra={"client_order_id": client_order_id},
+                )
+            )
+            raise
+
+        outcome = outcome_fields(resolution.order, cancel_requested=resolution.cancel_requested)
+        if not resolution.filled:
+            pending = not resolution.terminal
+            self.ledger.append(
+                Record(
+                    action=Action.ORDER_PENDING if pending else Action.ORDER_REJECTED,
+                    cycle_id=cycle_id,
+                    structure=str(family),
+                    rationale=(
+                        f"Alpaca reports {resolution.order.status} with "
+                        f"{resolution.order.filled_qty}/{size.contracts} contracts filled; "
+                        "the entry is not recorded as an open position."
+                    ),
+                    contracts=size.contracts,
+                    reject_reason="entry_pending" if pending else "entry_not_filled",
+                    outcome=outcome,
+                    extra={"client_order_id": client_order_id},
+                )
+            )
+            raise DataError(
+                f"entry {order.id} was not fully filled: {resolution.order.status} "
+                f"{resolution.order.filled_qty}/{size.contracts}"
+            )
+
         self.ledger.append(
             Record(
                 action=Action.ORDER_FILLED,
                 cycle_id=cycle_id,
                 structure=str(family),
-                rationale=f"Alpaca accepted the multi-leg order as {order.id}.",
+                rationale=(
+                    f"Alpaca verified the multi-leg order {resolution.order.id} as fully filled "
+                    f"for {resolution.order.filled_qty} contracts."
+                ),
                 contracts=size.contracts,
-                outcome={
-                    "order_id": str(order.id),
-                    "status": str(order.status),
-                    "submitted_at": str(order.submitted_at),
-                },
+                legs=best.candidate.leg_dicts(),
+                net_price=limit_price,
+                cost_breakdown=best.estimate.cost.as_dict(),
+                max_loss=round(best.estimate.profile.max_loss * size.contracts, 2),
+                es_contribution=round(best.estimate.expected_shortfall * size.contracts, 2),
+                outcome=outcome,
+                extra={"client_order_id": client_order_id},
             )
         )
-        result.orders.append({"family": str(family), "order_id": str(order.id)})
+        result.orders.append({"family": str(family), "order_id": str(resolution.order.id)})
 
     def _fees_paid(self) -> float:
-        """Execution cost paid so far, read back out of the ledger."""
-        total = 0.0
-        for record in self.ledger.read():
-            if record.get("action") == Action.ORDER_FILLED.value:
+        """Actual settled fees plus a conservative reserve for open verified entries.
+
+        A submission is not a trade and must never consume the fee budget. A
+        broker-reconciled close carries actual fees; a verified entry not yet
+        closed carries only its configured entry-fee reserve until Alpaca has
+        published the day-level activity receipt.
+        """
+        settled_entry_ids: set[str] = set()
+        actual = 0.0
+        rows = list(self.ledger.read())
+        for record in rows:
+            if record.get("action") != Action.POSITION_RECONCILED.value:
+                continue
+            outcome = record.get("outcome") or {}
+            entry_order_id = str(outcome.get("entry_order_id", ""))
+            if not entry_order_id or "broker_fees" not in outcome:
+                raise DataError(
+                    f"reconciled position {record.get('seq')} is missing its broker fee receipt"
+                )
+            settled_entry_ids.add(entry_order_id)
+            actual += float(outcome["broker_fees"])
+
+        reserved = 0.0
+        for record in rows:
+            if record.get("action") not in {
+                Action.ORDER_FILLED.value,
+                Action.ORDER_RECONCILED.value,
+            }:
+                continue
+            outcome = record.get("outcome") or {}
+            order_id = str(outcome.get("order_id", ""))
+            if order_id in settled_entry_ids:
+                continue
+            if str(outcome.get("status", "")).lower() != "filled":
                 continue
             breakdown = record.get("cost_breakdown")
-            if record.get("action") == Action.ORDER_SUBMITTED.value and breakdown:
-                total += float(breakdown.get("total", 0.0))
-        return total
+            contracts = record.get("contracts")
+            if breakdown is None or contracts is None or "fees" not in breakdown:
+                raise DataError(
+                    f"verified entry {order_id} is missing its fee reserve receipt"
+                )
+            reserved += float(breakdown["fees"]) * int(contracts)
+        return actual + reserved

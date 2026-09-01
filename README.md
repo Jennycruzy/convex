@@ -100,7 +100,7 @@ Every one must pass, and every verdict, pass or fail, is written to the ledger.
 **Session scope**, run once before anything is priced:
 
 1. **Kill switch**: an append-only file, checked every cycle
-2. **Calibration**: no position is opened while any cost or liquidity input is still an unmeasured guess. The config names its own unmeasured values where the code reads them, not only in a comment, and this check refuses the session until real quotes have replaced them. The per-contract fees ship at zero, and a zero fee understates the net-of-cost hurdle in the one direction that matters
+2. **Calibration**: no position is opened while any cost or liquidity input is still an unmeasured guess. The spread threshold is measured at 09:55 ET and a fresh successful receipt is required at the exact 10:00 entry. Fee assumptions remain conservative bounds until Alpaca's activity provides the actual fee receipt
 3. **Market calendar**: from Alpaca's own calendar, never from a local holiday table
 4. **Daily loss limit**: 3% of equity, then halt and publish
 5. **Buying power**: verified against the account, never assumed
@@ -192,7 +192,7 @@ observed firing has not been demonstrated. Use `-s` to see the measured figures.
 ## Honest limitations
 
 - **The research is SPX; this trades SPY.** Every parameter carried across is a hypothesis. Values in `config/convex.yaml` are marked `MEASURED` or `HYPOTHESIS`, and the hypotheses are not to be relied on in a live decision until `scripts/calibrate_costs.py` has replaced them.
-- **The exposure features are proxies.** They are flow/exposure estimates built from traded volume, open interest and leg Greeks, not a dealer-inventory reconstruction. Calling them GEX would overstate what they are.
+- **The exposure feature is optional and a proxy.** Alpaca currently omits Greeks and open interest on expiring SPY contracts, so it is not a classifier input. When the feed supplies it, it is displayed as a flow/exposure estimate, not a dealer-inventory reconstruction.
 - **The classifier may not have enough history.** Training runs on chains the agent *recorded*, never on simulated ones, because an expired contract's book cannot be fetched back, and a session that was not recorded can never be labelled honestly. Early on there will be too few sessions to clear the burn-in; `scripts/train.py` says so and fits nothing rather than presenting a model fitted on thirty rows. The agent then runs a documented volatility-regime rule, and every ledger record states which of the two made the call.
 - **No Sharpe is reported below twenty observations.** A handful of trades with
   similar results produces a ratio in the hundreds; that is a small denominator, not

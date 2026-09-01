@@ -35,6 +35,7 @@ from typing import Sequence
 
 from convex.config import Config
 from convex.errors import ConvexError, DataError, ExecutionError
+from convex.execution import outcome_fields, resolve_order
 from convex.instruments import OptionContract, Quote, parse_occ_symbol
 from convex.ledger import Action, Ledger, Record, new_cycle_id
 
@@ -322,14 +323,33 @@ class PositionManager:
     def _close(self, plan: ClosePlan, report: ManagerReport) -> None:
         leg = plan.leg
         client_order_id = f"convex-close-{report.cycle_id}-{leg.symbol}"[:48]
+        self.ledger.append(
+            Record(
+                action=Action.POSITION_CLOSE_SUBMITTED,
+                cycle_id=report.cycle_id,
+                structure=leg.symbol,
+                rationale=(
+                    f"Submitting a closing limit at {plan.limit_price:.2f} for "
+                    f"{leg.contracts:+d} {leg.symbol}, crossing {plan.crosses_for:.2f} "
+                    f"from a mid of {plan.quote.mid:.2f}."
+                ),
+                contracts=leg.contracts,
+                net_price=round(plan.limit_price, 2),
+                extra={"client_order_id": client_order_id},
+            )
+        )
         try:
             order = self.gateway.close_leg(
                 leg.symbol, leg.contracts, plan.limit_price, client_order_id
             )
-        except ExecutionError as error:
-            # A failed close is the one failure this module cannot swallow and
-            # cannot retry blindly: it means a leg the guard wanted gone is
-            # still open. It is recorded and surfaced, and the operator decides.
+            resolution = resolve_order(
+                self.gateway,
+                order,
+                abs(leg.contracts),
+                timeout_seconds=self.config.float_("execution.order_status_timeout_seconds"),
+                poll_seconds=self.config.float_("execution.order_poll_seconds"),
+            )
+        except ConvexError as error:
             self.ledger.append(
                 Record(
                     action=Action.ORDER_REJECTED,
@@ -338,9 +358,46 @@ class PositionManager:
                     rationale=f"Could not close {leg.symbol}: {error}",
                     contracts=leg.contracts,
                     reject_reason="close_rejected",
+                    extra={"client_order_id": client_order_id},
                 )
             )
             report.failed.append({"symbol": leg.symbol, "error": str(error)})
+            return
+
+        outcome = outcome_fields(resolution.order, cancel_requested=resolution.cancel_requested)
+        outcome.update(
+            {
+                "trigger": str(report.triggers[0]),
+                "unrealised_pnl_at_close": round(leg.unrealised_pnl, 2),
+                "average_entry_price": leg.average_entry_price,
+            }
+        )
+        if not resolution.filled:
+            pending = not resolution.terminal
+            self.ledger.append(
+                Record(
+                    action=Action.POSITION_CLOSE_PENDING if pending else Action.ORDER_REJECTED,
+                    cycle_id=report.cycle_id,
+                    structure=leg.symbol,
+                    rationale=(
+                        f"Close {resolution.order.id} is {resolution.order.status} with "
+                        f"{resolution.order.filled_qty}/{abs(leg.contracts)} contracts filled; "
+                        "the position remains under guard."
+                    ),
+                    contracts=leg.contracts,
+                    net_price=round(plan.limit_price, 2),
+                    reject_reason="close_pending" if pending else "close_not_filled",
+                    outcome=outcome,
+                    extra={"client_order_id": client_order_id},
+                )
+            )
+            report.failed.append(
+                {
+                    "symbol": leg.symbol,
+                    "error": "closing order was not fully filled",
+                    "order_id": resolution.order.id,
+                }
+            )
             return
 
         self.ledger.append(
@@ -349,22 +406,16 @@ class PositionManager:
                 cycle_id=report.cycle_id,
                 structure=leg.symbol,
                 rationale=(
-                    f"Sent a closing limit at {plan.limit_price:.2f} for {leg.contracts:+d} "
-                    f"{leg.symbol}, crossing {plan.crosses_for:.2f} from a mid of "
-                    f"{plan.quote.mid:.2f}."
+                    f"Alpaca verified close {resolution.order.id} fully filled at "
+                    f"{resolution.order.filled_avg_price} for {leg.contracts:+d} {leg.symbol}."
                 ),
                 contracts=leg.contracts,
                 net_price=round(plan.limit_price, 2),
-                outcome={
-                    "order_id": str(order.id),
-                    "status": str(order.status),
-                    "trigger": str(report.triggers[0]),
-                    "unrealised_pnl_at_close": round(leg.unrealised_pnl, 2),
-                    "average_entry_price": leg.average_entry_price,
-                },
+                outcome=outcome,
+                extra={"client_order_id": client_order_id},
             )
         )
-        report.closed.append({"symbol": leg.symbol, "order_id": str(order.id)})
+        report.closed.append({"symbol": leg.symbol, "order_id": str(resolution.order.id)})
 
     # --------------------------------------------------------------- settlement
 

@@ -1,0 +1,23 @@
+# Measure the live 0DTE book shortly before the 10:00 ET entry.
+#
+# This service writes a fresh calibration receipt only after Alpaca reports an
+# open market and a sufficiently broad real chain. A failed calibration leaves
+# no usable receipt, and the session service then refuses to run.
+
+[Unit]
+Description=CONVEX 09:55 ET live calibration
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=ubuntu
+WorkingDirectory=/home/ubuntu/convex
+Environment=HOME=/home/ubuntu
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/home/ubuntu/convex/.venv/bin/python -m scripts.calibrate_costs --write
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/home/ubuntu/convex/data /home/ubuntu/convex/config /home/ubuntu/convex/docs
+ProtectHome=read-only

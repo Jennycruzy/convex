@@ -54,6 +54,27 @@ def apply_measurement(
     return _drop_from_hypotheses(updated, key)
 
 
+def refresh_measurement(
+    text: str, key: str, value: float, when: date, by: str, places: int = 4
+) -> str:
+    """Update a previously attested measurement without reintroducing a hypothesis.
+
+    A live session remeasures its liquidity threshold every day. The first
+    measurement clears the blocking provenance entry; later measurements update
+    the dated value but must not fail merely because that entry is already gone.
+    """
+    section, _, leaf = key.rpartition(".")
+    if not section or not leaf:
+        raise ConfigError(f"{key!r} is not a dotted config key")
+    updated = _rewrite_value(text, section, leaf, value, when, by, places)
+    try:
+        return _drop_from_hypotheses(updated, key)
+    except ConfigError as error:
+        if "not listed under provenance.hypothesis" not in str(error):
+            raise
+        return updated
+
+
 def _rewrite_value(
     text: str, section: str, leaf: str, value: float, when: date, by: str, places: int
 ) -> str:

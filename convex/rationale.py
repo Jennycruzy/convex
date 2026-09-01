@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -27,6 +28,9 @@ from convex.sizing import SizeDecision
 from convex.structures.base import Candidate
 
 FEATHERLESS_ENDPOINT = "https://api.featherless.ai/v1/chat/completions"
+
+NUMBER = re.compile(r"(?<![A-Za-z0-9_.])[+-]?(?:[0-9]+(?:[.][0-9]+)?|[.][0-9]+)[%]?")
+
 
 SYSTEM_PROMPT = (
     "You are the narration layer of an options trading agent. You will be given "
@@ -111,6 +115,12 @@ def deterministic_text(
     )
 
 
+def _has_only_brief_numbers(text: str, brief: str) -> bool:
+    """Reject narration that introduces, changes, or re-rounds a number."""
+    allowed = set(NUMBER.findall(brief))
+    return all(number in allowed for number in NUMBER.findall(text))
+
+
 def narrate(brief: str, fallback: str, timeout_seconds: float = 8.0) -> Rationale:
     """Ask Featherless to phrase the brief, and never depend on the answer."""
     api_key = os.environ.get("FEATHERLESS_API_KEY", "").strip()
@@ -152,4 +162,10 @@ def narrate(brief: str, fallback: str, timeout_seconds: float = 8.0) -> Rational
         )
     if not text:
         return Rationale(text=fallback, source="deterministic (featherless returned nothing)", brief=brief)
+    if not _has_only_brief_numbers(text, brief):
+        return Rationale(
+            text=fallback,
+            source="deterministic (featherless introduced or changed a number)",
+            brief=brief,
+        )
     return Rationale(text=text, source="featherless", brief=brief)

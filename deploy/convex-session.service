@@ -1,20 +1,14 @@
-# The trading day, start to finish, without anyone at a keyboard.
-#
-# Calibration first, then the cycle, in that order and only in that order: the
-# cycle stands down on an unmeasured liquidity threshold, and calibration is
-# what measures it against a book that is actually quoting. If calibration
-# refuses, which it does on a shut market or a book too thin to measure, it
-# exits non-zero and the cycle does not run. That is the correct outcome and
-# not a failure to alert on: a session that cannot measure its costs is a
-# session that should not trade.
+# The decision begins at exactly 10:00 ET. Its calibration is a separate
+# 09:55 service: this unit refuses to run if that service did not leave a fresh
+# live-market receipt, rather than quietly using yesterday's threshold.
 #
 # Install with:
-#   sudo cp deploy/convex-session.service deploy/convex-session.timer /etc/systemd/system/
+#   sudo cp deploy/convex-calibrate.* deploy/convex-session.* /etc/systemd/system/
 #   sudo systemctl daemon-reload
-#   sudo systemctl enable --now convex-session.timer
+#   sudo systemctl enable --now convex-calibrate.timer convex-session.timer
 
 [Unit]
-Description=CONVEX calibration and decision cycle
+Description=CONVEX 10:00 ET decision cycle
 Wants=network-online.target
 After=network-online.target
 
@@ -24,7 +18,7 @@ User=ubuntu
 WorkingDirectory=/home/ubuntu/convex
 Environment=HOME=/home/ubuntu
 Environment=PYTHONUNBUFFERED=1
-ExecStart=/home/ubuntu/convex/.venv/bin/python -m scripts.calibrate_costs --write
+ExecStartPre=/home/ubuntu/convex/.venv/bin/python -m scripts.assert_fresh_calibration --max-age-seconds=900
 ExecStart=/home/ubuntu/convex/.venv/bin/python -m scripts.run_cycle
 NoNewPrivileges=true
 PrivateTmp=true

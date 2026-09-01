@@ -155,6 +155,12 @@ def test_a_z_suffixed_timestamp_parses():
     assert alpaca._stamp("2026-08-28T14:30:00Z", "quote").tzinfo is not None
 
 
+def test_order_polling_uses_the_wall_clock_module_not_datetime_time():
+    """A pending order must poll using the module, not datetime.time."""
+    assert callable(alpaca.wall_time.monotonic)
+    assert callable(alpaca.wall_time.sleep)
+
+
 def test_greeks_are_none_when_the_snapshot_has_none_rather_than_being_zeroed():
     assert alpaca._greeks({"latestQuote": {"bp": 1.0}}) is None
     assert alpaca._greeks({"greeks": {"delta": 0.5}, "impliedVolatility": None}) is None

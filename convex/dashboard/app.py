@@ -90,13 +90,18 @@ footer { margin-top: 44px; padding-top: 16px; border-top: 1px solid var(--line);
 """
 
 TAGS = {
-    Action.ORDER_SUBMITTED.value: ("opened", "opened"),
+    Action.ORDER_SUBMITTED.value: ("submitted", "stood"),
+    Action.ORDER_PENDING.value: ("pending", "refused"),
     Action.ORDER_FILLED.value: ("filled", "opened"),
+    Action.ORDER_RECONCILED.value: ("reconciled fill", "opened"),
     Action.CANDIDATE_REJECTED.value: ("refused", "refused"),
     Action.ORDER_REJECTED.value: ("rejected", "refused"),
     Action.STAND_DOWN.value: ("stood down", "stood"),
     Action.RISK_HALT.value: ("halted", "halt"),
+    Action.POSITION_CLOSE_SUBMITTED.value: ("close submitted", "stood"),
+    Action.POSITION_CLOSE_PENDING.value: ("close pending", "refused"),
     Action.POSITION_CLOSED.value: ("closed", "stood"),
+    Action.POSITION_RECONCILED.value: ("reconciled close", "stood"),
     Action.SNAPSHOT.value: ("snapshot", "stood"),
     Action.CALIBRATION.value: ("calibration", "stood"),
 }
@@ -371,10 +376,14 @@ def create_app(config: Config | None = None) -> FastAPI:
             )
         )
         body.append(_tile("cycles", str(summary.cycles), count=summary.cycles))
-        body.append(_tile("opened", str(summary.orders), count=summary.orders))
+        body.append(_tile("verified fills", str(summary.orders), count=summary.orders))
         body.append(
-            _tile("refused", str(summary.refusals), "cost ate the edge",
-                  count=summary.refusals)
+            _tile(
+                "all gate refusals",
+                str(summary.refusals),
+                f"{summary.cost_refusals} net-of-cost",
+                count=summary.refusals,
+            )
         )
         body.append(
             _tile("stood down", str(summary.stand_downs), "a first-class outcome",
@@ -385,8 +394,13 @@ def create_app(config: Config | None = None) -> FastAPI:
                   "low is not obviously good")
         )
         body.append(
-            _tile("execution cost", f"{summary.execution_cost:,.2f}", "paid to trade",
-                  count=summary.execution_cost, places=2)
+            _tile(
+                "modelled friction reserve",
+                f"{summary.execution_cost:,.2f}",
+                "verified entries only; not broker fees paid",
+                count=summary.execution_cost,
+                places=2,
+            )
         )
         body.append("</div>")
 

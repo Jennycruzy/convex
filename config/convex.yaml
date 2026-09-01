@@ -99,7 +99,7 @@ execution:
   order_poll_seconds: 1
 
 liquidity:
-  max_relative_spread: 0.1047       # MEASURED 2026-08-31 by scripts/calibrate_costs.py
+  max_relative_spread: 0.1280       # MEASURED 2026-09-01 by scripts/calibrate_costs.py
   min_displayed_size: 1             # contracts on the touch
   max_quote_age_seconds: 30         # feature-staleness budget
 

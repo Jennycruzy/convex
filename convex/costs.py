@@ -176,3 +176,14 @@ class CostModel:
         entry_cost = breakdown.half_spread + breakdown.slippage + breakdown.fees
         multiplier = legs[0].contract.multiplier
         return self.mid_debit(legs) + entry_cost / (contracts * multiplier)
+
+    def risk_debit(self, legs: Sequence[Leg], contracts: int = 1) -> float:
+        """Per-share cash including entry costs and the assignment exit reserve.
+
+        The reserve is a real part of the tail budget for short legs that must
+        be bought back before American-style assignment. Omitting it from max
+        loss lets the sizer allocate more than the stated risk budget.
+        """
+        breakdown = self.breakdown(legs, contracts)
+        multiplier = legs[0].contract.multiplier
+        return self.mid_debit(legs) + breakdown.total / (contracts * multiplier)

@@ -1,0 +1,14 @@
+# The live-spread measurement used by the 10:00 ET decision.
+#
+# Persistent=false is deliberate: a missed market-time calibration must never
+# be replayed late and mistaken for an entry-time measurement.
+
+[Unit]
+Description=Run CONVEX calibration before the research entry
+
+[Timer]
+OnCalendar=Mon-Fri 09:55 America/New_York
+Persistent=false
+
+[Install]
+WantedBy=timers.target

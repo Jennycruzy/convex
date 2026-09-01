@@ -58,6 +58,7 @@ class Summary:
     decisions: int = 0
     orders: int = 0
     refusals: int = 0
+    cost_refusals: int = 0
     stand_downs: int = 0
     halts: int = 0
     realised_pnl: float = 0.0
@@ -92,6 +93,9 @@ def summarise(records: Iterable[dict[str, Any]]) -> Summary:
     realised = 0.0
     settled = 0
     cost = 0.0
+    cost_refusals = 0
+    submissions: dict[tuple[str, str], dict[str, Any]] = {}
+    verified_entries: dict[str, dict[str, Any]] = {}
 
     for row in rows:
         action = row.get("action")
@@ -99,35 +103,53 @@ def summarise(records: Iterable[dict[str, Any]]) -> Summary:
             if action == candidate.value:
                 counts[candidate] += 1
         outcome = row.get("outcome") or {}
-        if action == Action.POSITION_CLOSED.value and "realised_pnl" in outcome:
-            realised += float(outcome["realised_pnl"])
-            settled += 1
         if action == Action.ORDER_SUBMITTED.value:
-            breakdown = row.get("cost_breakdown")
-            # Law 3. A submitted order without its cost breakdown or its lot
-            # count is a ledger this page cannot total honestly, and the old
-            # reading of it assumed one lot, which invented the number rather
-            # than reporting that it was missing.
-            if breakdown is None or row.get("contracts") is None:
-                raise ValueError(
-                    f"ledger row {row.get('seq')} submitted an order without "
-                    "a cost breakdown and a contract count; the page cannot "
-                    "total execution cost from it"
-                )
-            if "total" not in breakdown:
-                raise ValueError(
-                    f"ledger row {row.get('seq')} has a cost breakdown with no "
-                    f"'total' (keys: {sorted(breakdown)})"
-                )
-            cost += float(breakdown["total"]) * int(row["contracts"])
+            submissions[(str(row.get("cycle_id")), str(row.get("structure")))] = row
+        if action == Action.CANDIDATE_REJECTED.value and row.get("reject_reason") == "net_of_cost":
+            cost_refusals += 1
+        if action in {Action.POSITION_CLOSED.value, Action.POSITION_RECONCILED.value}:
+            if "realised_pnl" in outcome:
+                realised += float(outcome["realised_pnl"])
+                settled += 1
+        if action in {Action.ORDER_FILLED.value, Action.ORDER_RECONCILED.value}:
+            # Old rows that labelled pending_new a fill are deliberately
+            # excluded. A fill needs a broker status and a positive whole
+            # quantity; reconciliation may add those facts later.
+            if str(outcome.get("status", "")).lower() != "filled":
+                continue
+            try:
+                quantity = int(float(outcome["filled_qty"]))
+            except (KeyError, TypeError, ValueError):
+                continue
+            if quantity <= 0 or float(outcome["filled_qty"]) != quantity:
+                continue
+            order_id = str(outcome.get("order_id", ""))
+            if not order_id:
+                continue
+            verified_entries[order_id] = row
+
+    for row in verified_entries.values():
+        breakdown = row.get("cost_breakdown")
+        contracts = row.get("contracts")
+        if breakdown is None or contracts is None:
+            submitted = submissions.get((str(row.get("cycle_id")), str(row.get("structure"))))
+            if submitted is not None:
+                breakdown = submitted.get("cost_breakdown")
+                contracts = submitted.get("contracts")
+        if breakdown is None or contracts is None or "total" not in breakdown:
+            # This cannot be displayed as a paid cost. A reconciliation receipt
+            # without its friction inputs is excluded instead of guessed.
+            continue
+        cost += float(breakdown["total"]) * int(contracts)
 
     stamps = [row["ts"] for row in rows if row.get("ts")]
     decisions = sum(counts[action] for action in DECISION_ACTIONS)
     return Summary(
         cycles=len(cycles),
         decisions=decisions,
-        orders=counts[Action.ORDER_SUBMITTED],
+        orders=len(verified_entries),
         refusals=counts[Action.CANDIDATE_REJECTED],
+        cost_refusals=cost_refusals,
         stand_downs=counts[Action.STAND_DOWN],
         halts=counts[Action.RISK_HALT],
         realised_pnl=round(realised, 2),
@@ -240,7 +262,10 @@ def realised_curve(records: Iterable[dict[str, Any]]) -> tuple[list[float], list
     gross_curve: list[float] = []
     net_curve: list[float] = []
     for row in records:
-        if row.get("action") != Action.POSITION_CLOSED.value:
+        if row.get("action") not in {
+            Action.POSITION_CLOSED.value,
+            Action.POSITION_RECONCILED.value,
+        }:
             continue
         outcome = row.get("outcome") or {}
         if "realised_pnl" not in outcome:

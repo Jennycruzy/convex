@@ -51,10 +51,9 @@ SHARED_FEATURES: tuple[str, ...] = (
     "iv_dn",
     "slope_up",
     "slope_dn",
-    "gex_balance",
-    # Flow, which survives reconstruction where the book does not. tape_put_share
-    # is the one to watch: it is the traded counterpart of implied skew, and skew
-    # is the documented driver.
+    # Alpaca does not publish Greeks/OI for the expiring contracts CONVEX
+    # trades, so GEX is recorded only when supplied and never fitted as a
+    # classifier predictor. Flow survives both live and reconstructed rows.
     "tape_volume",
     "tape_breadth",
     "tape_concentration",
@@ -286,7 +285,7 @@ def build_samples(
             outcomes = [
                 (
                     settlement_pnl_of(
-                        entry.candidate, entry.estimate.profile.net_entry_debit, settlement
+                        entry.candidate, cost_model.mid_debit(entry.candidate.legs), settlement
                     ),
                     entry.estimate.cost.total,
                 )
@@ -302,7 +301,7 @@ def build_samples(
             # results follow this series, and so does every figure downstream
             # that claims to be money.
             traded_gross = settlement_pnl_of(
-                best.candidate, best.estimate.profile.net_entry_debit, settlement
+                best.candidate, cost_model.mid_debit(best.candidate.legs), settlement
             )
             traded_cost = best.estimate.cost.total
             traded_net = traded_gross - traded_cost

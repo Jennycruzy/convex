@@ -130,6 +130,8 @@ def evaluate(
         net_outcomes=net_outcomes,
         expected_shortfall=expected_shortfall(net_outcomes, es_confidence),
         win_rate=float((net_outcomes > 0.0).mean()),
-        profile=risk_profile(legs, cost_model.executable_debit(legs, contracts)),
+        # Size against the same all-in friction used in net outcomes. In
+        # particular, short-leg exit reserves cannot disappear from max loss.
+        profile=risk_profile(legs, cost_model.risk_debit(legs, contracts)),
         spot=spot,
     )

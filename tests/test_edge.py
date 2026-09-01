@@ -74,6 +74,16 @@ def test_cost_scales_with_leg_count(test_chain, config, scenarios):
     assert fly.cost.leg_count > vertical.cost.leg_count
 
 
+def test_tail_sizing_includes_the_short_leg_exit_reserve(test_chain, config, scenarios):
+    """The loss budget must see the same all-in friction as net edge does."""
+    model = CostModel.from_config(config)
+    candidate = put_broken_wing_butterflies(chain_index(test_chain), config, 650.0)[0]
+    estimate = evaluate(candidate.legs, scenarios, model, 650.0, 1, 0.01)
+
+    assert model.risk_debit(candidate.legs) > model.executable_debit(candidate.legs)
+    assert estimate.profile.net_entry_debit == pytest.approx(model.risk_debit(candidate.legs))
+
+
 def test_a_wide_spread_can_turn_a_positive_gross_edge_negative(config):
     """The finding the whole project is built on, reproduced in miniature.
 

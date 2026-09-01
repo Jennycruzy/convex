@@ -19,7 +19,7 @@ import pytest
 
 from convex.config import load
 from convex.errors import ConfigError
-from convex.measured import apply_measurement, write_atomically
+from convex.measured import apply_measurement, refresh_measurement, write_atomically
 
 WHEN = date(2026, 8, 31)
 BY = "scripts/calibrate_costs.py"
@@ -123,6 +123,15 @@ def test_a_key_already_measured_is_refused_rather_than_written_twice(original):
     once = measure(original)
     with pytest.raises(ConfigError, match="not listed under provenance.hypothesis"):
         measure(once)
+
+
+def test_a_repeat_live_measurement_refreshes_the_dated_value(original, tmp_path):
+    once = measure(original)
+    refreshed = refresh_measurement(once, KEY, 0.0812, date(2026, 9, 1), BY)
+    line = next(line for line in refreshed.splitlines() if line.strip().startswith("max_relative_spread:"))
+    assert "0.0812" in line
+    assert "MEASURED 2026-09-01" in line
+    assert KEY not in load(_write(tmp_path / "refreshed.yaml", refreshed)).hypotheses()
 
 
 def test_a_closed_market_is_refused_and_the_file_is_left_byte_identical(tmp_path, original):

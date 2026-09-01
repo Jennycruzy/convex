@@ -307,9 +307,9 @@ def build(
     # seen. Alpaca serves no Greeks and no open interest on an expiring
     # contract, so on a live 0DTE chain these three keys do not appear and
     # anything that genuinely needs one fails loudly at FeatureSet.vector
-    # rather than reading a fabricated zero. No fitted model asks for them:
-    # training.UNRECONSTRUCTABLE_FEATURES already excludes gex_balance, because
-    # a rebuilt session cannot supply it either.
+    # rather than reading a fabricated zero. GEX is displayed when present,
+    # but training.SHARED_FEATURES deliberately excludes it: the 0DTE model
+    # must have the same observable schema on every live session.
     if chain_carries_greeks(chain):
         signed_gamma, absolute_gamma, gamma_balance = gamma_exposure(chain, spot)
         values["gex_signed"] = signed_gamma

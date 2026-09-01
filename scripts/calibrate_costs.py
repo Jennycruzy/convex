@@ -39,7 +39,7 @@ from convex.config import load
 from convex.costs import CostModel
 from convex.data.alpaca import AlpacaGateway
 from convex.errors import ConfigError, ConvexError, UndefinedRiskError
-from convex.measured import apply_measurement, write_atomically
+from convex.measured import refresh_measurement, write_atomically
 from convex.ledger import Action, Ledger, Record, new_cycle_id
 from convex.payoff import risk_profile
 from convex.structures import build_candidates
@@ -98,7 +98,7 @@ def main() -> int:
             breakdown = model.breakdown(candidate.legs, 1)
             try:
                 profile = risk_profile(
-                    candidate.legs, model.executable_debit(candidate.legs, 1)
+                    candidate.legs, model.risk_debit(candidate.legs, 1)
                 )
             except UndefinedRiskError:
                 # A structure whose worst case is not computable is not costed;
@@ -203,7 +203,7 @@ def _apply(config, ledger, threshold: float, legs: int, market_open: bool, measu
     before = config.float_(MEASURED_KEY)
     path = config.path
     try:
-        updated = apply_measurement(
+        updated = refresh_measurement(
             path.read_text(),
             MEASURED_KEY,
             threshold,
@@ -230,6 +230,7 @@ def _apply(config, ledger, threshold: float, legs: int, market_open: bool, measu
                 "before": before,
                 "after": round(threshold, 6),
                 "legs": legs,
+                "market_open": market_open,
                 "measurement": measured,
             },
         )

@@ -22,7 +22,7 @@ transport it is on.
 from __future__ import annotations
 
 import os
-import time
+import time as wall_time
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
@@ -143,6 +143,9 @@ class OrderRecord:
     client_order_id: str
     filled_qty: str
     filled_avg_price: str | None
+    # The raw broker response is retained for reconciliation only. Decision
+    # code consumes the validated scalar fields above, never optional legs.
+    raw: dict[str, Any] | None = None
 
 
 # --------------------------------------------------------------------- parsing
@@ -657,7 +660,38 @@ class AlpacaGateway:
         )
 
     def order(self, order_id: str) -> OrderRecord:
-        return _order_record(self._client.call("get_order_by_id", {"order_id": order_id}))
+        return _order_record(self.order_raw(order_id))
+
+    def order_raw(self, order_id: str) -> dict[str, Any]:
+        """The unmodified broker order receipt, for append-only reconciliation."""
+        raw = self._client.call("get_order_by_id", {"order_id": order_id})
+        if not isinstance(raw, dict):
+            raise DataError(f"get_order_by_id returned {type(raw).__name__}, not an order")
+        return raw
+
+    def account_activities(
+        self,
+        *,
+        after: date | None = None,
+        before: date | None = None,
+        activity_types: str = "FILL",
+        page_size: int = 100,
+    ) -> list[dict[str, Any]]:
+        """Broker activities used to reconcile fills; no decision consumes them."""
+        if page_size <= 0:
+            raise DataError(f"activity page size must be positive, found {page_size}")
+        payload: dict[str, Any] = {
+            "activity_types": activity_types,
+            "page_size": page_size,
+        }
+        if after is not None:
+            payload["after"] = after.isoformat()
+        if before is not None:
+            payload["before"] = before.isoformat()
+        raw = self._client.call("get_account_activities", payload)
+        if not isinstance(raw, list) or not all(isinstance(row, dict) for row in raw):
+            raise DataError("get_account_activities did not return a list of activity objects")
+        return raw
 
     def wait_for_order(
         self, order_id: str, timeout_seconds: float, poll_seconds: float
@@ -677,13 +711,13 @@ class AlpacaGateway:
                 f"cannot wait for order {order_id} with a non-positive poll interval"
             )
 
-        deadline = time.monotonic() + timeout_seconds
+        deadline = wall_time.monotonic() + timeout_seconds
         latest = self.order(order_id)
         while latest.status.lower() not in _TERMINAL_ORDER_STATUSES:
-            remaining = deadline - time.monotonic()
+            remaining = deadline - wall_time.monotonic()
             if remaining <= 0.0:
                 return latest
-            time.sleep(min(poll_seconds, remaining))
+            wall_time.sleep(min(poll_seconds, remaining))
             latest = self.order(order_id)
         return latest
 
@@ -732,12 +766,13 @@ def _order_record(raw: Any) -> OrderRecord:
     return OrderRecord(
         id=str(_require(raw, "id", context)),
         status=str(_require(raw, "status", context)),
-        submitted_at=str(raw.get("submitted_at", "")),
-        client_order_id=str(raw.get("client_order_id", "")),
-        filled_qty=str(raw.get("filled_qty", "0")),
+        submitted_at=str(_require(raw, "submitted_at", context)),
+        client_order_id=str(_require(raw, "client_order_id", context)),
+        filled_qty=str(_require(raw, "filled_qty", context)),
         filled_avg_price=(
             str(raw["filled_avg_price"]) if raw.get("filled_avg_price") is not None else None
         ),
+        raw=dict(raw),
     )
 
 
