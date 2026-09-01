@@ -13,6 +13,7 @@ process can die before the receipt is durable.
 
 from __future__ import annotations
 
+import fcntl
 import json
 import os
 import threading
@@ -38,6 +39,7 @@ class Action(StrEnum):
     # does not exist.
     DRY_RUN = "dry_run"
     ORDER_SUBMITTED = "order_submitted"
+    ORDER_PENDING = "order_pending"
     ORDER_FILLED = "order_filled"
     ORDER_REJECTED = "order_rejected"
     POSITION_CLOSED = "position_closed"
@@ -129,14 +131,26 @@ class Ledger:
         """Write one record durably and return the line as written."""
         timestamp = datetime.now(timezone.utc)
         with self._lock:
-            self._sequence += 1
-            line = record.to_json(timestamp, self._sequence)
-            if "\n" in line:
-                raise ConvexError("a ledger record serialised to more than one line")
-            with self.path.open("a", encoding="utf-8") as handle:
-                handle.write(line + "\n")
-                handle.flush()
-                os.fsync(handle.fileno())
+            # The dashboard, manager, calibration job and decision cycle are
+            # separate processes. A threading.Lock protects only one process;
+            # the file lock protects the sequence and the append across all of
+            # them. Recount while holding it so a Ledger constructed earlier
+            # cannot reuse a sequence another process has already written.
+            with self.path.open("a+", encoding="utf-8") as handle:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+                try:
+                    handle.seek(0)
+                    self._sequence = sum(1 for line in handle if line.strip())
+                    self._sequence += 1
+                    line = record.to_json(timestamp, self._sequence)
+                    if "\n" in line:
+                        raise ConvexError("a ledger record serialised to more than one line")
+                    handle.seek(0, os.SEEK_END)
+                    handle.write(line + "\n")
+                    handle.flush()
+                    os.fsync(handle.fileno())
+                finally:
+                    fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
         return line
 
     def read(self) -> Iterator[dict[str, Any]]:
@@ -144,13 +158,17 @@ class Ledger:
         if not self.path.exists():
             return
         with self.path.open("r", encoding="utf-8") as handle:
-            for number, raw in enumerate(handle, start=1):
-                if not raw.strip():
-                    continue
-                try:
-                    yield json.loads(raw)
-                except json.JSONDecodeError as exc:
-                    raise ConvexError(f"{self.path}:{number} is not valid JSON: {exc}") from exc
+            fcntl.flock(handle.fileno(), fcntl.LOCK_SH)
+            try:
+                for number, raw in enumerate(handle, start=1):
+                    if not raw.strip():
+                        continue
+                    try:
+                        yield json.loads(raw)
+                    except json.JSONDecodeError as exc:
+                        raise ConvexError(f"{self.path}:{number} is not valid JSON: {exc}") from exc
+            finally:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
 def new_cycle_id() -> str:

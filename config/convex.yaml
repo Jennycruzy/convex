@@ -91,6 +91,13 @@ costs:
   regulatory_fee_per_contract: 0.10 # BOUND: OCC/ORF/exchange pass-through
   exit_reserve_legs: short          # legs assumed to need closing: short | all | none
 
+execution:
+  # A multi-leg order is not an open position until Alpaca reports the full
+  # quantity filled. A pending order is surfaced and the cycle stops; it is
+  # never promoted to a fill by the client that submitted it.
+  order_status_timeout_seconds: 30
+  order_poll_seconds: 1
+
 liquidity:
   max_relative_spread: 0.1047       # MEASURED 2026-08-31 by scripts/calibrate_costs.py
   min_displayed_size: 1             # contracts on the touch

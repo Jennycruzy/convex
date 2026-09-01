@@ -22,6 +22,7 @@ transport it is on.
 from __future__ import annotations
 
 import os
+import time
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
@@ -63,6 +64,21 @@ _MAX_BARS_PER_PAGE = 10_000
 # A 2% band on SPY is around sixty contracts once both rights are counted, and
 # the request goes in a query string, so the symbol list is sent in batches.
 _SYMBOLS_PER_REQUEST = 40
+
+_TERMINAL_ORDER_STATUSES = frozenset(
+    {
+        "filled",
+        "canceled",
+        "cancelled",
+        "rejected",
+        "expired",
+        "done_for_day",
+        "stopped",
+        "suspended",
+        "calculated",
+        "replaced",
+    }
+)
 
 
 def _batched(items: list[str], size: int) -> Iterator[list[str]]:
@@ -642,6 +658,34 @@ class AlpacaGateway:
 
     def order(self, order_id: str) -> OrderRecord:
         return _order_record(self._client.call("get_order_by_id", {"order_id": order_id}))
+
+    def wait_for_order(
+        self, order_id: str, timeout_seconds: float, poll_seconds: float
+    ) -> OrderRecord:
+        """Read an order until Alpaca gives it a terminal status or time runs out.
+
+        Submission is not evidence of a fill. A timeout returns the latest
+        broker state so the caller can record that it remains pending and stop
+        the cycle; it must never guess whether a write reached the account.
+        """
+        if timeout_seconds <= 0.0:
+            raise ExecutionError(
+                f"cannot wait for order {order_id} with a non-positive timeout"
+            )
+        if poll_seconds <= 0.0:
+            raise ExecutionError(
+                f"cannot wait for order {order_id} with a non-positive poll interval"
+            )
+
+        deadline = time.monotonic() + timeout_seconds
+        latest = self.order(order_id)
+        while latest.status.lower() not in _TERMINAL_ORDER_STATUSES:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0.0:
+                return latest
+            time.sleep(min(poll_seconds, remaining))
+            latest = self.order(order_id)
+        return latest
 
     def open_orders(self) -> list[OrderRecord]:
         """Orders Alpaca is still working, oldest first.
