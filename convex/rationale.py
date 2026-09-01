@@ -121,6 +121,17 @@ def _has_only_brief_numbers(text: str, brief: str) -> bool:
     return all(number in allowed for number in NUMBER.findall(text))
 
 
+def _provider_status(body: object) -> str | None:
+    """Return a safe, concise provider error code when one is present."""
+    if not isinstance(body, dict):
+        return None
+    error = body.get("error")
+    if not isinstance(error, dict):
+        return None
+    code = error.get("code")
+    return code if isinstance(code, str) and code else "provider_error"
+
+
 def narrate(brief: str, fallback: str, timeout_seconds: float = 8.0) -> Rationale:
     """Ask Featherless to phrase the brief, and never depend on the answer."""
     api_key = os.environ.get("FEATHERLESS_API_KEY", "").strip()
@@ -150,7 +161,20 @@ def narrate(brief: str, fallback: str, timeout_seconds: float = 8.0) -> Rational
     try:
         with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
             body = json.loads(response.read().decode("utf-8"))
+        provider_status = _provider_status(body)
+        if provider_status is not None:
+            return Rationale(
+                text=fallback,
+                source=f"deterministic (featherless unavailable: {provider_status})",
+                brief=brief,
+            )
         text = body["choices"][0]["message"]["content"].strip()
+    except urllib.error.HTTPError as exc:
+        return Rationale(
+            text=fallback,
+            source=f"deterministic (featherless unavailable: HTTP {exc.code})",
+            brief=brief,
+        )
     except (urllib.error.URLError, KeyError, IndexError, json.JSONDecodeError, TimeoutError) as exc:
         # The narration is decoration on a decision that is already made and
         # already justified. Its failure is recorded and the deterministic
