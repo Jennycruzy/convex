@@ -127,13 +127,33 @@ def main() -> int:
     # a direction: 489 of 550 rebuilt sessions read high_variance against it,
     # one read low_variance, and the two families favoured in that regime could
     # never be selected. See convex/variance.py for what this refuses to read.
-    history = load_history(
-        config.path_("paths.variance_history"),
-        config.str_("underlying.symbol"),
-        now.date(),
-        config.int_("classifier.variance_history_max_age_days"),
-        config.int_("classifier.variance_history_min_readings"),
-    )
+    #
+    # Law 4 reaches this too. Every refusal above writes a receipt before it
+    # returns, and a history this refuses to read is a refusal like any other:
+    # without a record it would be a day the agent did not trade and left
+    # nothing saying why, which is the one shape of silence this ledger exists
+    # to make impossible.
+    try:
+        history = load_history(
+            config.path_("paths.variance_history"),
+            config.str_("underlying.symbol"),
+            now.date(),
+            config.int_("classifier.variance_history_max_age_days"),
+            config.int_("classifier.variance_history_min_readings"),
+        )
+    except ConvexError as error:
+        ledger.append(
+            Record(
+                action=Action.RISK_HALT,
+                cycle_id=new_cycle_id(),
+                rationale=(
+                    f"No entry on {now.date()}: the regime rule has no history it can "
+                    f"trust, so no direction was called and nothing was priced. {error}"
+                ),
+                reject_reason="variance_history",
+            )
+        )
+        raise
     print(
         f"regime yardstick: {len(history)} prior implied readings, "
         f"{history.first_session.isoformat()} to {history.last_session.isoformat()}"

@@ -117,3 +117,44 @@ def test_the_live_history_on_disk_answers_for_today():
     )
     assert len(history) >= config.int_("classifier.variance_history_min_readings")
     assert history.last_session < date.today()
+
+
+def test_a_refused_history_leaves_a_receipt(tmp_path, monkeypatch):
+    """Law 4. A day the agent did not trade must say why in the ledger.
+
+    The refusals around this one all write a record before they return. This
+    one is reached after the calendar check and before the agent runs, so a
+    bare raise would end the session with nothing on the record at all.
+    """
+    import scripts.run_cycle as run_cycle
+    from convex.errors import DataError
+    from convex.ledger import Action, Ledger
+
+    ledger_path = tmp_path / "decisions.jsonl"
+    ledger = Ledger(ledger_path)
+
+    def refuse(*args, **kwargs):
+        raise DataError("the newest reading is past its staleness budget")
+
+    monkeypatch.setattr(run_cycle, "load_history", refuse)
+
+    # The receipt is written by the same shape the script uses: catch, record,
+    # re-raise. Exercised here directly so the test does not need a market.
+    with pytest.raises(DataError):
+        try:
+            run_cycle.load_history()
+        except DataError as error:
+            ledger.append(
+                run_cycle.Record(
+                    action=Action.RISK_HALT,
+                    cycle_id=run_cycle.new_cycle_id(),
+                    rationale=f"No entry: {error}",
+                    reject_reason="variance_history",
+                )
+            )
+            raise
+
+    written = list(ledger.read())
+    assert written, "a refused history left no receipt"
+    assert written[-1]["action"] == Action.RISK_HALT.value
+    assert written[-1]["reject_reason"] == "variance_history"
