@@ -209,7 +209,9 @@ def main() -> int:
                 f"Rebuilt from the option tape over {arguments.days} days, not replayed on "
                 f"chains the agent recorded, and priced at a modelled relative spread of "
                 f"{arguments.relative_spread:.3f} per leg. Compare that against the spread "
-                f"measured on the live chain before reading any figure below. Sharpe over "
+                f"measured on the live chain before reading any figure below. The classified "
+                f"arm is an out of sample fitted model choosing its sessions, which is not the "
+                f"same thing as the selector the live agent runs. Sharpe over "
                 f"{sessions} sessions is arithmetic, not evidence."
             )
         else:

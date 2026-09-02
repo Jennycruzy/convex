@@ -83,12 +83,29 @@ def main() -> int:
     leg_half_spreads = [row.quote.half_spread for row in chain]
     leg_relative = [row.quote.relative_spread for row in chain]
 
+    # A leg quoted on one side only is not an expensive leg, it is a leg nobody
+    # is making a market in. With bid at zero the mid is half the ask and the
+    # relative spread computes to exactly 2.0, which is where the 200% p90 in
+    # every one of these notes comes from. Leaving those in the population that
+    # sets the threshold drags the median up and makes the liquidity check more
+    # permissive, which is the same defect as taking the p90 one layer down:
+    # the number ends up describing the book instead of constraining it. They
+    # stay in the printed distribution, because what the whole band looks like
+    # is worth seeing, and they are excluded from the threshold.
+    tradeable = tradeable_legs(chain)
+    leg_relative_tradeable = [row.quote.relative_spread for row in tradeable]
+
     print(f"{symbol} at {spot:,.2f}, expiry {expiry}, {len(chain)} contracts\n")
     print("per leg, across the whole snapshot")
     print(f"  half-spread      median {statistics.median(leg_half_spreads):.3f} "
           f"  p90 {_quantile(leg_half_spreads, 0.9):.3f}")
     print(f"  relative spread  median {statistics.median(leg_relative):.1%} "
           f"  p90 {_quantile(leg_relative, 0.9):.1%}")
+    one_sided = len(chain) - len(tradeable)
+    if leg_relative_tradeable:
+        print(f"  two sided only   median {statistics.median(leg_relative_tradeable):.1%} "
+              f"  p90 {_quantile(leg_relative_tradeable, 0.9):.1%} "
+              f"  ({one_sided} of {len(chain)} legs quoted one sided)")
 
     rows: list[dict] = []
     print("\nper structure, at one contract")
@@ -139,6 +156,11 @@ def main() -> int:
         "leg_half_spread_p90": round(_quantile(leg_half_spreads, 0.9), 4),
         "leg_relative_spread_median": round(statistics.median(leg_relative), 4),
         "leg_relative_spread_p90": round(_quantile(leg_relative, 0.9), 4),
+        "two_sided_legs": len(tradeable),
+        "one_sided_legs": len(chain) - len(tradeable),
+        "leg_relative_spread_median_two_sided": (
+            round(statistics.median(leg_relative_tradeable), 4) if leg_relative_tradeable else None
+        ),
         "families": rows,
     }
 
@@ -170,13 +192,18 @@ def main() -> int:
     # Cost is priced into every candidate before ranking, so a structure that
     # cannot pay for its own execution is already last. What this rejects is a
     # leg whose book is not a market: wider than the typical leg in the band.
-    threshold = _quantile(leg_relative, 0.5)
+    threshold = _quantile(leg_relative_tradeable, 0.5) if leg_relative_tradeable else None
+    if threshold is None:
+        print("\nrefusing to write: not one leg in the band is quoted on both sides.")
+        return 2
     if not arguments.write:
         print(f"\nmeasured  {MEASURED_KEY}: {threshold:.4f}")
         print("re-run with --write to put it in the configuration")
         return 0
 
-    return _apply(config, ledger, threshold, len(chain), market_open, measured)
+    # The count that gates the write is the tradeable one, because that is the
+    # population the median is taken over now.
+    return _apply(config, ledger, threshold, len(tradeable), market_open, measured)
 
 
 def _apply(config, ledger, threshold: float, legs: int, market_open: bool, measured: dict) -> int:
@@ -238,6 +265,18 @@ def _apply(config, ledger, threshold: float, legs: int, market_open: bool, measu
     print(f"\n{MEASURED_KEY}: {before:.4f} -> {threshold:.4f}, written to {path}")
     print("cleared from provenance.hypothesis; the session will price on it")
     return 0
+
+
+def tradeable_legs(chain):
+    """The legs of a chain that someone is quoting on both sides.
+
+    A leg with no bid cannot be sold and a leg with no ask cannot be bought, so
+    neither belongs in a distribution used to decide what a normal leg costs to
+    cross. With bid at zero the mid is half the ask and the relative spread is
+    exactly 2.0 by construction, which is a fact about the absence of a market
+    rather than a measurement of one.
+    """
+    return [row for row in chain if row.quote.bid > 0.0 and row.quote.ask > 0.0]
 
 
 def _quantile(values: list[float], fraction: float) -> float:
