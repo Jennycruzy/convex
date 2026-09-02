@@ -53,6 +53,11 @@ MEASURED_KEY = "liquidity.max_relative_spread"
 # so the run reports and refuses rather than writing a threshold off it.
 MINIMUM_LEGS = 40
 
+# Where the liquidity ceiling sits inside the distribution of legs that are
+# actually quoted on both sides. See the note beside its use for why it is not
+# the median.
+QUANTILE = 0.65
+
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
@@ -192,7 +197,19 @@ def main() -> int:
     # Cost is priced into every candidate before ranking, so a structure that
     # cannot pay for its own execution is already last. What this rejects is a
     # leg whose book is not a market: wider than the typical leg in the band.
-    threshold = _quantile(leg_relative_tradeable, 0.5) if leg_relative_tradeable else None
+    # The 65th percentile of the legs somebody is quoting, and the quantile is
+    # not arbitrary. Excluding one sided legs fixed the population this is
+    # measured over, which was the defect. It also, unintentionally, made the
+    # ceiling much tighter: the old contaminated median sat at the 70th
+    # percentile of tradeable legs on 31 August and the 64th on 1 September, so
+    # the system has been running at about p65 all along. Leaving the quantile
+    # at the median would have moved the ceiling as well as the population, and
+    # on 31 August it deleted the only straddle candidate there is, which is the
+    # structure that filled. One correction at a time: this repairs the
+    # population and holds the strictness where it has been. Whether the ceiling
+    # should sit at the median is a real question and it needs its own evidence,
+    # not a side effect of this one.
+    threshold = _quantile(leg_relative_tradeable, QUANTILE) if leg_relative_tradeable else None
     if threshold is None:
         print("\nrefusing to write: not one leg in the band is quoted on both sides.")
         return 2

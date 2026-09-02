@@ -14,7 +14,7 @@ import pytest
 
 from convex.errors import DataError
 from convex.instruments import Right
-from scripts.calibrate_costs import tradeable_legs
+from scripts.calibrate_costs import QUANTILE, _quantile, tradeable_legs
 from tests.conftest import entry
 
 
@@ -50,6 +50,26 @@ def test_the_excluded_legs_are_the_ones_that_would_have_moved_the_threshold():
     kept = tradeable_legs(chain)
     assert len(kept) == 1
     assert kept[0].quote.relative_spread == pytest.approx(0.0392, abs=1e-4)
+
+
+def test_the_ceiling_sits_where_the_system_has_been_running():
+    # Correcting the population must not quietly correct the strictness too.
+    # The old contaminated median landed at the 70th percentile of tradeable
+    # legs on 31 August and the 64th on 1 September, so p65 holds the ceiling
+    # where it has been while the legs it is measured over become honest ones.
+    # At the median instead, the only straddle candidate on 31 August does not
+    # survive, and that is the structure that filled.
+    assert QUANTILE == pytest.approx(0.65)
+
+
+def test_a_ceiling_at_the_median_would_be_tighter_than_the_one_in_use():
+    # Guards the direction of the previous test rather than only its value: if
+    # someone lowers the quantile, they are tightening the check, and this says
+    # so in the failure message.
+    spreads = [0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.20, 0.30, 0.40, 0.50]
+    chain = [entry(760.0 + i, Right.CALL, 1.00, 1.00 * (1 + s)) for i, s in enumerate(spreads)]
+    kept = [row.quote.relative_spread for row in tradeable_legs(chain)]
+    assert _quantile(kept, 0.5) < _quantile(kept, QUANTILE)
 
 
 def test_a_crossed_quote_is_refused_before_it_can_be_measured_at_all():
