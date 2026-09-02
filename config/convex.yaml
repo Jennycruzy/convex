@@ -34,8 +34,6 @@ provenance:
   conservative_bound:
     - session.pin_band_pct
     - costs.slippage_ticks_per_leg
-    - costs.per_contract_fee
-    - costs.regulatory_fee_per_contract
 
 underlying:
   symbol: SPY
@@ -82,13 +80,18 @@ costs:
   # Law 7. Populated by scripts/calibrate_costs.py against real SPY 0DTE quotes.
   slippage_ticks_per_leg: 1.0       # BOUND: a full tick beyond mid on every leg
   tick_size: 0.01                   # MEASURED at runtime from quote increments
-  # Both fees stood at zero, which is not a conservative guess but the least
-  # conservative one available: a zero fee understates the net-of-cost hurdle in
-  # exactly the direction that makes a bad candidate look tradeable. They are
-  # now set well above any plausible retail options fee and are replaced from
-  # the first fill's activity record.
-  per_contract_fee: 0.10            # BOUND: Alpaca options commission
-  regulatory_fee_per_contract: 0.10 # BOUND: OCC/ORF/exchange pass-through
+  # MEASURED 2026-08-31 from the broker's own fee activities: 6.62 dollars
+  # across 140 executed contracts, which is 0.047286 per contract. Two
+  # independent routes agree on it, the fee activity records and the cash
+  # reconciliation in the ledger, so it is a measurement and not an estimate.
+  #
+  # Alpaca reports one fee bucket and does not separate commission from the
+  # regulatory pass-through, so the whole measured figure sits in the first
+  # field and the second is zero. That zero is not the dangerous kind this
+  # comment used to warn about: nothing is being assumed away, the amount is
+  # simply all accounted for one line above.
+  per_contract_fee: 0.047286        # MEASURED 2026-08-31 from 140 filled contracts
+  regulatory_fee_per_contract: 0.0  # MEASURED: the broker reports no separate line
   exit_reserve_legs: short          # legs assumed to need closing: short | all | none
 
 execution:

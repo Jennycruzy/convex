@@ -421,7 +421,18 @@ def test_the_session_proceeds_once_every_input_has_been_measured(measured, tmp_p
     # figures are still bounds rather than measurements.
     calibration = next(r for r in report.results if r.name == "calibration")
     assert "over-estimates" in calibration.detail
-    assert "costs.per_contract_fee" in calibration.detail
+    # Every key the configuration still lists as a bound is named, and nothing
+    # else is. Asserting the list rather than one hard-coded key means measuring
+    # something and clearing it from the list cannot silently stop it being
+    # reported, and cannot break this test either. costs.per_contract_fee used
+    # to be named here and was measured on 2026-08-31 against the broker's own
+    # fee activities, which is exactly the transition this now tolerates.
+    bounds = [str(name) for name in measured.list_("provenance.conservative_bound")]
+    assert bounds, "the fixture should still carry at least one standing bound"
+    for name in bounds:
+        assert name in calibration.detail
+    for name in measured.list_("provenance.hypothesis"):
+        assert str(name) not in calibration.detail
 
 
 def test_a_bound_never_blocks_but_a_hypothesis_always_does(measured, tmp_path):
