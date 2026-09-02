@@ -66,6 +66,24 @@ class PricedCandidate:
     estimate: EdgeEstimate
 
 
+def cost_consumed(priced: Sequence[PricedCandidate]) -> list[PricedCandidate]:
+    """Candidates that were profitable gross and are not profitable net.
+
+    These never reach a gate. The ranking below is ordered by net edge and the
+    walk only ever reaches its first few entries, so a structure whose whole
+    gross edge goes to the cost of crossing is demoted out of contention and
+    never seen again. That is Law 7 doing the most important thing this agent
+    does, and it left no receipt: the net-of-cost gate can only ever fire on a
+    candidate cost has already vindicated, which reads as though cost never
+    bit. Counting them where they die is what puts the refusal on the record.
+    """
+    return [
+        item
+        for item in priced
+        if item.estimate.gross_edge > 0.0 and item.estimate.net_edge <= 0.0
+    ]
+
+
 def rank(priced: Sequence[PricedCandidate], tie_break: Sequence[str]) -> list[PricedCandidate]:
     """Best net edge first; a close race goes to the structure with fewer legs.
 
@@ -330,6 +348,39 @@ class Agent:
                         extra={"unpriceable": unpriceable[:10]},
                     )
                 )
+            consumed = cost_consumed(priced)
+            if consumed:
+                worst = min(consumed, key=lambda item: item.estimate.net_edge)
+                self.ledger.append(
+                    Record(
+                        action=Action.CANDIDATE_REJECTED,
+                        cycle_id=cycle_id,
+                        structure=str(family),
+                        rationale=(
+                            f"{len(consumed)} of {len(priced)} priced {family} structures "
+                            "showed a gross profit that execution cost consumed entirely, "
+                            "and were refused before ranking. Worst: "
+                            f"{worst.candidate.description} at a gross edge of "
+                            f"{worst.estimate.gross_edge:,.2f} against "
+                            f"{worst.estimate.cost.total:,.2f} of cost across "
+                            f"{worst.estimate.cost.leg_count} legs, leaving "
+                            f"{worst.estimate.net_edge:,.2f}."
+                        ),
+                        reject_reason="net_of_cost",
+                        extra={
+                            "consumed": len(consumed),
+                            "priced": len(priced),
+                            "worst": {
+                                "description": worst.candidate.description,
+                                "gross_edge": round(worst.estimate.gross_edge, 2),
+                                "cost": round(worst.estimate.cost.total, 2),
+                                "net_edge": round(worst.estimate.net_edge, 2),
+                                "legs": worst.estimate.cost.leg_count,
+                            },
+                        },
+                    )
+                )
+
             ordered = rank(priced, [str(name) for name in self.config.list_("structures.tie_break_order")])
             if not ordered:
                 continue
