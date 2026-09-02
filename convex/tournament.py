@@ -1,9 +1,16 @@
-"""Isolated, dry-run profiles for the final paper-trading tournament.
+"""Named candidate universes for comparing the same engine against itself.
 
-This module deliberately contains no broker write. ``scripts.tournament``
-wraps the real gateway in ``DryRunGateway`` and each profile writes evidence to
-its own ledger. A profile is therefore comparable without being able to alter
-the competition account by accident.
+This module holds profile definitions and the trend reading they need. It
+contains no broker write of its own, and that is a fact about this file rather
+than a promise about the system: ``scripts.tournament`` wraps the gateway in
+``DryRunGateway`` by default, and ``--submit`` with a named profile hands the
+live gateway over instead and sends one bounded, defined-risk order to the
+paper account. Read that script before assuming a profile cannot trade.
+
+What a profile does guarantee is separation. Each one runs against an
+in-memory configuration override rather than the operator's YAML, and writes
+its evidence to its own ledger, so a comparison never edits the live strategy
+and never mixes its receipts into the main log.
 """
 
 from __future__ import annotations

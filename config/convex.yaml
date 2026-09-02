@@ -161,9 +161,17 @@ structures:
   enabled: [put_bwb, call_bwb, straddle, strangle, debit_vertical]
   tie_break_order: [put_bwb, debit_vertical, straddle, strangle, call_bwb]
 
-# The tournament runner is dry-run only. These profiles are intentionally
-# separate from the main strategy configuration; invoking it cannot submit an
-# order, and each profile has its own ledger for a side-by-side dashboard view.
+# Profiles for comparing the same engine under different candidate universes.
+# They are deliberately separate from the main strategy configuration above:
+# scripts/tournament.py reads them through an in-memory override, so a
+# comparison run never rewrites this file, and each profile keeps its own
+# ledger for a side-by-side dashboard view.
+#
+# The runner is dry-run by default and not dry-run only. Passing --submit with
+# a named profile sends one bounded, defined-risk order to the paper account,
+# and on 2 September that route filled 6 lots of a call broken-wing butterfly
+# at 12:01 ET. An earlier version of this comment claimed invoking the runner
+# could not submit an order, which was not true of the code beneath it.
 tournament:
   profiles:
     skew_bwb:
