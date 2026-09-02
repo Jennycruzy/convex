@@ -4,6 +4,14 @@
 # next session reads, so a day that never settles is a day the agent cannot
 # learn from, and the realised equity curve on the dashboard stays empty.
 #
+# It also rebuilds the implied variance history the regime rule is compared
+# against. That file carries a staleness budget and the 10:00 entry refuses to
+# run against an expired one, so rebuilding it is not housekeeping either: a
+# history nobody refreshed is a session that stands down. It runs second and
+# with a leading dash, so a failed rebuild cannot cost the settlement that has
+# already succeeded, and the entry check catches a stale file loudly anyway.
+# It is bars-heavy and belongs after the close, where nothing else is reading.
+#
 # Install with:
 #   sudo cp deploy/convex-settle.service deploy/convex-settle.timer /etc/systemd/system/
 #   sudo systemctl daemon-reload
@@ -21,6 +29,7 @@ WorkingDirectory=/home/ubuntu/convex
 Environment=HOME=/home/ubuntu
 Environment=PYTHONUNBUFFERED=1
 ExecStart=/home/ubuntu/convex/.venv/bin/python -m scripts.manage --settle
+ExecStart=-/home/ubuntu/convex/.venv/bin/python -m scripts.variance_history --days 800
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict

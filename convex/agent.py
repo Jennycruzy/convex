@@ -194,7 +194,13 @@ class Agent:
         if model is not None:
             return model.probability(snapshot.vector(model.feature_names)), "classifier"
         regime = self.rule.regime(snapshot.values["iv_total"], variance_history)
-        return self.rule.probability(family, regime), f"regime rule ({regime})"
+        # The yardstick is named in the receipt because the same rule returns a
+        # different regime depending on what it is compared against, and a
+        # reader of the ledger cannot otherwise tell which comparison was made.
+        return (
+            self.rule.probability(family, regime),
+            f"regime rule ({regime}, implied history of {len(variance_history)} readings)",
+        )
 
     # -------------------------------------------------------------------- cycle
 

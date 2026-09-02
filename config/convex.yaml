@@ -128,6 +128,15 @@ classifier:
   # better outcome: a model that has learned only the base rate still looks
   # like evidence, and that is worse than a rule that admits what it is.
   min_skill_sigmas: 2.0
+  # The regime rule compares today's implied variance against prior implied
+  # readings, rebuilt from the tape by scripts/variance_history.py. Two guards
+  # on that file, both of which stand the session down rather than guess: the
+  # newest reading may not be older than this many days, and there must be at
+  # least this many readings from before the session being decided. A rule
+  # reading a stale or thin history is worse than a rule that admits it cannot
+  # see, because it is the only thing choosing direction while no model ships.
+  variance_history_max_age_days: 5
+  variance_history_min_readings: 30
 
 risk:
   risk_pct_per_structure: 0.01      # 1% of equity
@@ -149,6 +158,7 @@ paths:
   mcp_log: data/logs/alpaca-mcp.log
   chain_archive: data/chains        # the 10:00 snapshots training reads
   scenario_archive: data/scenarios  # the terminal distributions used to price
+  variance_history: data/variance/implied.json   # prior implied readings for the regime rule
   models: data/models
   backtest_report: data/backtest.json
   kill_switch: data/KILL

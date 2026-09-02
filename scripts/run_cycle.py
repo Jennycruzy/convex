@@ -25,6 +25,7 @@ from convex.errors import ConvexError
 from convex.ledger import Action, Ledger, Record, new_cycle_id
 from convex.scenarios import build as build_scenarios
 from convex.scenarios import save as save_scenarios
+from convex.variance import load_history
 
 # Submissions close at 15:00 UTC on 4 September, which is before the opening
 # bell in New York, so no position is opened that morning.
@@ -120,9 +121,27 @@ def main() -> int:
         dry_run=arguments.dry_run,
     )
 
+    # Implied against implied. The rule used to be handed realised variance out
+    # of the scenario set, because a recorded implied series did not exist when
+    # it was written. It does now, rebuilt off the tape, and the substitute had
+    # a direction: 489 of 550 rebuilt sessions read high_variance against it,
+    # one read low_variance, and the two families favoured in that regime could
+    # never be selected. See convex/variance.py for what this refuses to read.
+    history = load_history(
+        config.path_("paths.variance_history"),
+        config.str_("underlying.symbol"),
+        now.date(),
+        config.int_("classifier.variance_history_max_age_days"),
+        config.int_("classifier.variance_history_min_readings"),
+    )
+    print(
+        f"regime yardstick: {len(history)} prior implied readings, "
+        f"{history.first_session.isoformat()} to {history.last_session.isoformat()}"
+    )
+
     result = agent.run_cycle(
         prior_returns=scenarios.log_returns.tolist(),
-        variance_history=scenarios.annualised_variance().tolist(),
+        variance_history=history.as_list(),
         family_pnl=family_results(ledger),
     )
 
