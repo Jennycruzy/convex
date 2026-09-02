@@ -1,0 +1,186 @@
+{
+  "sessions": 276,
+  "per_family": {
+    "call_bwb": {
+      "every session": {
+        "label": "every session",
+        "sessions": 276,
+        "trades": 276,
+        "gross_total": 2033.9,
+        "net_total": -1916.25,
+        "cost_total": 3950.05,
+        "gross_sharpe": 0.647,
+        "net_sharpe": -0.611,
+        "hit_rate": 0.3587,
+        "expected_shortfall": 626.63,
+        "max_drawdown": 2979.16,
+        "cost_share_of_gross": 1.9421
+      },
+      "classified": {
+        "label": "classified",
+        "sessions": 276,
+        "trades": 47,
+        "gross_total": 1523.0,
+        "net_total": 401.66,
+        "cost_total": 1121.33,
+        "gross_sharpe": 1.84,
+        "net_sharpe": 0.485,
+        "hit_rate": 0.5319,
+        "expected_shortfall": 731.77,
+        "max_drawdown": 1184.12,
+        "cost_share_of_gross": 0.7363
+      }
+    },
+    "debit_vertical": {
+      "every session": {
+        "label": "every session",
+        "sessions": 276,
+        "trades": 276,
+        "gross_total": -3673.08,
+        "net_total": -5942.9,
+        "cost_total": 2269.91,
+        "gross_sharpe": -0.992,
+        "net_sharpe": -1.605,
+        "hit_rate": 0.4203,
+        "expected_shortfall": 723.46,
+        "max_drawdown": 6863.52,
+        "cost_share_of_gross": null
+      },
+      "classified": {
+        "label": "classified",
+        "sessions": 276,
+        "trades": 46,
+        "gross_total": -820.17,
+        "net_total": -1451.57,
+        "cost_total": 631.39,
+        "gross_sharpe": -0.94,
+        "net_sharpe": -1.666,
+        "hit_rate": 0.5217,
+        "expected_shortfall": 737.92,
+        "max_drawdown": 1823.46,
+        "cost_share_of_gross": null
+      }
+    },
+    "put_bwb": {
+      "every session": {
+        "label": "every session",
+        "sessions": 276,
+        "trades": 276,
+        "gross_total": 2207.57,
+        "net_total": -1468.4,
+        "cost_total": 3676.23,
+        "gross_sharpe": 0.641,
+        "net_sharpe": -0.427,
+        "hit_rate": 0.3986,
+        "expected_shortfall": 671.08,
+        "max_drawdown": 3609.33,
+        "cost_share_of_gross": 1.6653
+      },
+      "classified": {
+        "label": "classified",
+        "sessions": 276,
+        "trades": 55,
+        "gross_total": 2329.79,
+        "net_total": 1167.74,
+        "cost_total": 1162.07,
+        "gross_sharpe": 2.788,
+        "net_sharpe": 1.404,
+        "hit_rate": 0.5636,
+        "expected_shortfall": 531.0,
+        "max_drawdown": 1662.89,
+        "cost_share_of_gross": 0.4988
+      }
+    },
+    "straddle": {
+      "every session": {
+        "label": "every session",
+        "sessions": 276,
+        "trades": 276,
+        "gross_total": -8528.73,
+        "net_total": -9953.91,
+        "cost_total": 1425.15,
+        "gross_sharpe": -1.861,
+        "net_sharpe": -2.172,
+        "hit_rate": 0.3623,
+        "expected_shortfall": 508.85,
+        "max_drawdown": 10421.02,
+        "cost_share_of_gross": null
+      },
+      "classified": {
+        "label": "classified",
+        "sessions": 276,
+        "trades": 16,
+        "gross_total": 1635.25,
+        "net_total": 1548.77,
+        "cost_total": 86.49,
+        "gross_sharpe": null,
+        "net_sharpe": null,
+        "hit_rate": 0.5,
+        "expected_shortfall": 363.97,
+        "max_drawdown": 841.53,
+        "cost_share_of_gross": 0.0529
+      }
+    },
+    "strangle": {
+      "every session": {
+        "label": "every session",
+        "sessions": 276,
+        "trades": 276,
+        "gross_total": -4318.24,
+        "net_total": -5041.39,
+        "cost_total": 723.1,
+        "gross_sharpe": -1.694,
+        "net_sharpe": -1.977,
+        "hit_rate": 0.1739,
+        "expected_shortfall": 164.1,
+        "max_drawdown": 5191.22,
+        "cost_share_of_gross": null
+      },
+      "classified": {
+        "label": "classified",
+        "sessions": 276,
+        "trades": 0,
+        "gross_total": 0.0,
+        "net_total": 0.0,
+        "cost_total": 0.0,
+        "gross_sharpe": null,
+        "net_sharpe": null,
+        "hit_rate": null,
+        "expected_shortfall": null,
+        "max_drawdown": 0.0,
+        "cost_share_of_gross": null
+      }
+    }
+  },
+  "basket": {
+    "classified": {
+      "label": "basket, classified",
+      "sessions": 276,
+      "trades": 94,
+      "gross_total": 4667.87,
+      "net_total": 1666.6,
+      "cost_total": 3001.28,
+      "gross_sharpe": 1.599,
+      "net_sharpe": 0.576,
+      "hit_rate": 0.4894,
+      "expected_shortfall": 1481.12,
+      "max_drawdown": 3285.35,
+      "cost_share_of_gross": 0.643
+    },
+    "every session": {
+      "label": "basket, every session",
+      "sessions": 276,
+      "trades": 276,
+      "gross_total": -12278.58,
+      "net_total": -24322.85,
+      "cost_total": 12044.44,
+      "gross_sharpe": -1.325,
+      "net_sharpe": -2.623,
+      "hit_rate": 0.3732,
+      "expected_shortfall": 1282.47,
+      "max_drawdown": 26037.83,
+      "cost_share_of_gross": null
+    }
+  },
+  "note": "Replayed on chains recorded by the agent at 10:00 ET. Sharpe figures over 276 sessions are arithmetic, not evidence."
+}

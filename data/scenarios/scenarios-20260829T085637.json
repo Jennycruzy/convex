@@ -1,0 +1,8 @@
+{
+  "scenarios": 513,
+  "first_day": "2024-08-12",
+  "last_day": "2026-08-28",
+  "sigma": 0.007516,
+  "skew": 1.1809,
+  "volatility_scale": 1.0
+}

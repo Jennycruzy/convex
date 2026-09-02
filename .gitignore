@@ -6,14 +6,21 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 .ruff_cache/
-data/ledger/
-data/chains/
+# The receipts ship. The write up cites the ledger as the artefact the page and
+# the paper share, and a reader who clones this and finds no ledger has been
+# asked to take every number here on trust. The chains and the scenario sets go
+# with it because they are what make a decision checkable rather than merely
+# readable: scripts/replay.py re-prices a whole session out of them and reaches
+# no network to do it.
+#
+# Still ignored, and for different reasons. The models directory, because no
+# fitted model earned its way into the live path and an empty promise of one is
+# worse than none. The logs, because 8.5MB of terminal escape codes and an
+# nginx error page is not evidence of anything.
 data/models/
-data/scenarios/
 *.log
 .DS_Store
 data/logs/
-data/backtest.json
 
 # Working notes for whoever picks this up next. Never committed:
 # it names the account, records what is unfinished, and is written for us
