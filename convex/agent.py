@@ -376,6 +376,10 @@ class Agent:
                         extra={
                             "consumed": len(consumed),
                             "priced": len(priced),
+                            # The page can only draw a record that carries one,
+                            # so the refusal this project is built on could not
+                            # be drawn at all while the others could.
+                            "waterfall": worst.estimate.waterfall(),
                             "worst": {
                                 "description": worst.candidate.description,
                                 "gross_edge": round(worst.estimate.gross_edge, 2),

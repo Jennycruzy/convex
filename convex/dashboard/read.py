@@ -230,13 +230,20 @@ def waterfalls(records: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
     # gross edge that did not survive its own half-spread is the finding this
     # project is built on, and a page that leads with a winning fill instead
     # buries it.
-    rows.sort(
-        key=lambda record: (
+    def _lead(record: dict[str, Any]) -> tuple:
+        # Net edge first. Refusals already sorted ahead of fills, but among
+        # refusals only by recency, so a candidate refused on a wide leg while
+        # its edge survived cost could lead the panel and caption itself "edge
+        # survived the cost". That is the one visual on the page that argues
+        # this project's case, and it was arguing against it.
+        waterfall = record.get("waterfall") or {}
+        return (
+            float(waterfall.get("net_edge", 0.0)) <= 0.0,
             record.get("action") == Action.CANDIDATE_REJECTED.value,
             record.get("ts", ""),
-        ),
-        reverse=True,
-    )
+        )
+
+    rows.sort(key=_lead, reverse=True)
     return rows
 
 

@@ -410,6 +410,12 @@ def create_app(config: Config | None = None) -> FastAPI:
             record = latest[0]
             action = record.get("action", "")
             label = "refused" if action == Action.CANDIDATE_REJECTED.value else "opened"
+            # Say which check refused it. A candidate turned away on a wide leg
+            # while its edge survived cost reads, next to this chart, as though
+            # cost refused something cost had approved.
+            reason = str(record.get("reject_reason") or "")
+            if action == Action.CANDIDATE_REJECTED.value and reason:
+                label = f"refused on {reason.replace('_', ' ')}"
             body.append(_section("mechanism", "GROSS AGAINST NET"))
             body.append(
                 "<p>The bar on the left is the edge before costs. Each "
@@ -420,6 +426,7 @@ def create_app(config: Config | None = None) -> FastAPI:
             body.append(
                 "<div class='panel-head'><h3>"
                 f"{escape(str(record.get('structure', 'candidate')))}</h3>"
+                f"<div><span class='stat-val'>{escape(label)}</span></div>"
                 f"{_tag(action)}</div>"
             )
             body.append("<div class='panel-body'>")
@@ -535,7 +542,7 @@ def _masthead(summary, live: bool) -> str:
         f"<span class='stat-val'>{summary.cycles}</span></div>"
         f"<div><span class='stat-key'>REF</span>"
         f"<span class='stat-val down'>{summary.refusals}</span></div>"
-        f"<div><span class='stat-key'>OPN</span>"
+        f"<div><span class='stat-key'>ORD</span>"
         f"<span class='stat-val up'>{summary.orders}</span></div>"
         "<div class='spacer'></div>"
         "<div><span class='stat-key'>CLK</span>"
@@ -665,20 +672,24 @@ def _crossing(points: list) -> str:
     not carry.
     """
     last_positive = None
-    first_negative = None
-    for point in points:
+    for point in sorted(points, key=lambda row: row["relative_spread"]):
         net = (point.get("classified") or {}).get("net_sharpe")
         if net is None:
             continue
         if net > 0:
             last_positive = point["relative_spread"]
-        elif first_negative is None and last_positive is not None:
-            first_negative = point["relative_spread"]
+        elif last_positive is not None:
+            # The first crossing is the break-even. Walking past it lets a later
+            # point come back above zero and become the left edge of the bracket,
+            # which is how this printed "7.0% to 1.5%" off a sweep that crosses
+            # between 1.0 and 1.5: the 7 percent point is 65 trades of a
+            # classifier gate selecting down to a sample that stopped meaning
+            # anything, and it is exactly the bump the sweep note warns against
+            # drawing a story from.
+            return f"{last_positive:.1%} to {point['relative_spread']:.1%}"
     if last_positive is None:
         return ""
-    if first_negative is None:
-        return f"beyond {last_positive:.1%}"
-    return f"{last_positive:.1%} to {first_negative:.1%}"
+    return f"beyond {last_positive:.1%}"
 
 
 def _decision_log(rows: list[dict[str, Any]], limit: int = 500) -> str:

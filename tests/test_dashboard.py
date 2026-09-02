@@ -628,3 +628,64 @@ def test_the_realised_panel_draws_once_there_are_two_closes(client):
     assert "<svg" in realised
     assert "+75.00 net" in realised
     assert "2 structure(s) settled" in realised
+
+
+def test_the_break_even_bracket_stops_at_the_first_crossing():
+    """A later point coming back above zero is not the break-even.
+
+    The sweep's widest point turns positive again on a handful of trades, which
+    is the classifier's own gate selecting down to a sample that stopped meaning
+    anything. Walking past the first crossing let that point become the left
+    edge and printed the bracket backwards.
+    """
+    from convex.dashboard.app import _crossing
+
+    points = [
+        {"relative_spread": 0.005, "classified": {"net_sharpe": 0.95}},
+        {"relative_spread": 0.010, "classified": {"net_sharpe": 0.64}},
+        {"relative_spread": 0.015, "classified": {"net_sharpe": -0.42}},
+        {"relative_spread": 0.050, "classified": {"net_sharpe": -1.75}},
+        {"relative_spread": 0.070, "classified": {"net_sharpe": 0.10}},
+    ]
+
+    assert _crossing(points) == "1.0% to 1.5%"
+
+
+def test_a_curve_that_never_crosses_says_so():
+    from convex.dashboard.app import _crossing
+
+    points = [
+        {"relative_spread": 0.005, "classified": {"net_sharpe": 0.95}},
+        {"relative_spread": 0.010, "classified": {"net_sharpe": 0.64}},
+    ]
+
+    assert _crossing(points) == "beyond 1.0%"
+
+
+def test_the_waterfall_leads_with_a_refusal_cost_actually_killed():
+    """The panel argues the project's case, so it must lead with a case.
+
+    A candidate refused on a wide leg while its edge survived cost captions
+    itself "edge survived the cost", which reads as cost refusing something
+    cost approved.
+    """
+    from convex.dashboard import read
+
+    survived = {
+        "ts": "2026-09-01T14:13:10+00:00",
+        "action": "candidate_rejected",
+        "structure": "debit_vertical",
+        "reject_reason": "liquidity",
+        "waterfall": {"gross_edge": 67.09, "net_edge": 61.99},
+    }
+    killed = {
+        "ts": "2026-08-31T17:22:10+00:00",
+        "action": "candidate_rejected",
+        "structure": "put_bwb",
+        "reject_reason": "net_of_cost",
+        "waterfall": {"gross_edge": 7.22, "net_edge": -101.06},
+    }
+
+    ordered = read.waterfalls([survived, killed])
+
+    assert ordered[0]["reject_reason"] == "net_of_cost"
