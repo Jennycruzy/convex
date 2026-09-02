@@ -24,7 +24,7 @@ from convex.gates import (
 from convex.instruments import Right
 from convex.scenarios import ScenarioSet
 from convex.sizing import PortfolioState, size_position
-from convex.structures.base import chain_index
+from convex.structures.base import Candidate, Family, chain_index
 from convex.structures.builders import put_broken_wing_butterflies
 from tests.conftest import leg
 
@@ -258,7 +258,32 @@ def test_cost_budget_stops_the_session(measured, tmp_path):
     assert report.first_failure.name == "cost_budget"
 
 
-def test_candidate_gates_pass_on_a_reasonable_structure(config, tmp_path, candidate, estimate):
+def test_candidate_gates_pass_on_a_reasonable_structure(config, tmp_path):
+    """A tight, defined-risk BWB with enough gross edge clears every gate.
+
+    The old shared chain fixture has three-cent half-spreads. After live
+    calibration tightened the liquidity ceiling, every otherwise-liquid BWB in
+    that fixture had its small gross edge consumed by realistic costs. That is
+    correct behaviour, but it left this test without a passing control.
+    """
+    candidate = Candidate(
+        family=Family.PUT_BWB,
+        legs=(
+            leg(652.0, Right.PUT, 3.00, 3.02, +1),
+            leg(650.0, Right.PUT, 1.80, 1.82, -2),
+            leg(647.0, Right.PUT, 0.40, 0.42, +1),
+        ),
+        description="tight put broken-wing butterfly",
+    )
+    favourable = ScenarioSet(
+        log_returns=np.zeros(200),
+        source_days=tuple(date(2026, 1, 1) for _ in range(200)),
+        entry_time=time(10, 0),
+        exit_time=time(16, 0),
+        volatility_scale=1.0,
+        built_at=NOW,
+    )
+    estimate = evaluate(candidate.legs, favourable, CostModel.from_config(config), 650.0, 1, 0.01)
     ctx = context(config, tmp_path)
     size = size_position(estimate, PortfolioState(100_000.0, 200_000.0, 0, 0.0), config)
     report = run_candidate_gates(ctx, candidate, estimate, size)

@@ -16,8 +16,8 @@ The gross-to-net waterfall on the dashboard is this object, drawn.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Sequence
+from collections.abc import Sequence
+from dataclasses import dataclass, replace
 
 import numpy as np
 
@@ -77,6 +77,29 @@ class EdgeEstimate:
             "exit_reserve": -round(self.cost.exit_reserve, 2),
             "net_edge": round(self.net_edge, 2),
         }
+
+
+def at_limit(
+    estimate: EdgeEstimate, legs: Sequence[Leg], cost_model: CostModel, limit_price: float,
+    es_confidence: float,
+) -> EdgeEstimate:
+    """Reprice an estimate at an actual limit rather than its modeled touch.
+
+    A worse limit is a cash concession, not free liquidity: it shifts every
+    scenario payoff, increases max loss, and is re-tested by the normal gates.
+    """
+    modeled = cost_model.executable_debit(legs, estimate.contracts)
+    concession = limit_price - modeled
+    dollars = concession * legs[0].contract.multiplier * estimate.contracts
+    outcomes = estimate.net_outcomes - dollars
+    return replace(
+        estimate,
+        gross_edge=estimate.gross_edge - dollars,
+        net_outcomes=outcomes,
+        expected_shortfall=expected_shortfall(outcomes, es_confidence),
+        win_rate=float((outcomes > 0.0).mean()),
+        profile=risk_profile(legs, estimate.profile.net_entry_debit + concession),
+    )
 
 
 def expected_shortfall(outcomes: np.ndarray, confidence: float) -> float:

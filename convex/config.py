@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import os
 import threading
+from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -77,6 +78,31 @@ class Config:
     def path_(self, dotted: str) -> Path:
         """Resolve a configured path relative to the repository root."""
         return (self.path.parent.parent / self.str_(dotted)).resolve()
+
+    def with_overrides(self, overrides: dict[str, Any]) -> "Config":
+        """Return an in-memory configuration with explicit dotted-key overrides.
+
+        Tournament profiles must not rewrite the operator's main YAML file: a
+        dry-run comparison is evidence, not a reason to alter the production
+        strategy. This keeps the same repository-relative path resolution and
+        validation behaviour while making profile-specific ledgers and family
+        sets possible.
+        """
+        values = deepcopy(self.values)
+        for dotted, value in overrides.items():
+            parts = dotted.split(".")
+            node: dict[str, Any] = values
+            for part in parts[:-1]:
+                child = node.get(part)
+                if not isinstance(child, dict):
+                    raise ConfigError(
+                        f"cannot override {dotted!r}: {'.'.join(parts[:-1])!r} is not a mapping"
+                    )
+                node = child
+            if parts[-1] not in node:
+                raise ConfigError(f"cannot override missing config key {dotted!r}")
+            node[parts[-1]] = value
+        return Config(path=self.path, loaded_mtime=self.loaded_mtime, values=values)
 
     def _provenance(self, kind: str) -> tuple[str, ...]:
         listed = self.get(f"provenance.{kind}")

@@ -25,7 +25,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field, replace
 from datetime import datetime, time, timedelta
 from pathlib import Path
-from typing import Sequence
+from typing import Callable, Sequence
 from zoneinfo import ZoneInfo
 
 from convex import archive
@@ -35,11 +35,11 @@ from convex.classifier import RegimeRule, StructureModel
 from convex.config import Config
 from convex.costs import CostModel
 from convex.data.alpaca import AlpacaGateway
-from convex.edge import EdgeEstimate, evaluate
+from convex.edge import EdgeEstimate, at_limit, evaluate
 from convex.errors import ConvexError, DataError, UndefinedRiskError
-from convex.execution import outcome_fields, resolve_order
+from convex.execution import filled_quantity, outcome_fields, resolve_order
 from convex.gates import GateContext, GateReport, run_candidate_gates, run_session_gates
-from convex.instruments import ChainEntry
+from convex.instruments import ChainEntry, Leg
 from convex.ledger import Action, Ledger, Record, new_cycle_id
 from convex.scenarios import ScenarioSet
 from convex.sizing import PortfolioState, SizeDecision, size_position
@@ -127,6 +127,9 @@ class Agent:
         models: dict[Family, StructureModel] | None = None,
         submission_cutoff: datetime | None = None,
         dry_run: bool = False,
+        candidate_filter: Callable[[Candidate], bool] | None = None,
+        receipt_context: dict | None = None,
+        reprice_ticks: tuple[int, ...] = (),
     ) -> None:
         self.gateway = gateway
         self.config = config
@@ -137,6 +140,9 @@ class Agent:
         self.rule = RegimeRule()
         self.submission_cutoff = submission_cutoff
         self.dry_run = dry_run
+        self.candidate_filter = candidate_filter
+        self.receipt_context = receipt_context or {}
+        self.reprice_ticks = tuple(tick for tick in reprice_ticks if tick > 0)
         self.max_attempts = config.int_("candidates.max_ranked_attempts")
         self.zone = ZoneInfo(config.str_("session.timezone"))
 
@@ -314,6 +320,24 @@ class Agent:
         opened = 0
 
         for family, candidates in build_candidates(chain, self.config, spot).items():
+            if self.candidate_filter is not None:
+                candidates = [
+                    candidate for candidate in candidates if self.candidate_filter(candidate)
+                ]
+            if not candidates:
+                self.ledger.append(
+                    Record(
+                        action=Action.STAND_DOWN,
+                        cycle_id=cycle_id,
+                        structure=str(family),
+                        rationale=(
+                            f"{family} stood down: the active profile supplied no candidates "
+                            "consistent with its observed signal."
+                        ),
+                        extra=dict(self.receipt_context),
+                    )
+                )
+                continue
             probability, source = self._probability(family, snapshot, variance_history)
             # Priced one at a time rather than in a comprehension, because a
             # live chain is a set of prints from different moments and a few of
@@ -391,7 +415,9 @@ class Agent:
                     )
                 )
 
-            ordered = rank(priced, [str(name) for name in self.config.list_("structures.tie_break_order")])
+            ordered = rank(
+                priced, [str(name) for name in self.config.list_("structures.tie_break_order")]
+            )
             if not ordered:
                 continue
 
@@ -469,7 +495,7 @@ class Agent:
                 continue
 
             self._open(
-                cycle_id, family, best, size, report, probability, source, result
+                cycle_id, family, best, size, report, probability, source, result, candidate_context
             )
             es_in_use += best.estimate.expected_shortfall * size.contracts
             opened += 1
@@ -529,7 +555,9 @@ class Agent:
         )
         result.rejections.append({"family": str(family), "reason": reason, "detail": detail})
 
-    def _open(self, cycle_id, family, best, size, report, probability, source, result) -> None:
+    def _open(
+        self, cycle_id, family, best, size, report, probability, source, result, context
+    ) -> None:
         brief = rationale_layer.build_brief(
             best.candidate, best.estimate, size, report, probability, source
         )
@@ -569,6 +597,7 @@ class Agent:
                     "sizing": size.as_dict(),
                     "client_order_id": client_order_id,
                     **rationale.as_dict(),
+                    **self.receipt_context,
                 },
             )
         )
@@ -607,23 +636,55 @@ class Agent:
 
         outcome = outcome_fields(resolution.order, cancel_requested=resolution.cancel_requested)
         if not resolution.filled:
-            pending = not resolution.terminal
-            self.ledger.append(
-                Record(
-                    action=Action.ORDER_PENDING if pending else Action.ORDER_REJECTED,
-                    cycle_id=cycle_id,
-                    structure=str(family),
-                    rationale=(
-                        f"Alpaca reports {resolution.order.status} with "
-                        f"{resolution.order.filled_qty}/{size.contracts} contracts filled; "
-                        "the entry is not recorded as an open position."
-                    ),
-                    contracts=size.contracts,
-                    reject_reason="entry_pending" if pending else "entry_not_filled",
-                    outcome=outcome,
-                    extra={"client_order_id": client_order_id},
-                )
+            can_retry = (
+                self.reprice_ticks
+                and resolution.terminal
+                and filled_quantity(resolution.order) == 0
             )
+            if can_retry:
+                # The first cancellation is its own broker fact, even if a
+                # later rung fills. Never let a successful retry erase it.
+                self.ledger.append(
+                    Record(
+                        action=Action.ORDER_REJECTED,
+                        cycle_id=cycle_id,
+                        structure=str(family),
+                        rationale=(
+                            f"Alpaca reports the initial entry {resolution.order.status} with "
+                            f"0/{size.contracts} contracts filled; fresh-quote retry is permitted."
+                        ),
+                        contracts=size.contracts,
+                        reject_reason="entry_not_filled",
+                        outcome=outcome,
+                        extra={
+                            **self.receipt_context,
+                            "client_order_id": client_order_id,
+                            "reprice_enabled": True,
+                        },
+                    )
+                )
+                if self._retry_entry(
+                    cycle_id, family, best, size, probability, source, result, context
+                ):
+                    return
+            else:
+                pending = not resolution.terminal
+                self.ledger.append(
+                    Record(
+                        action=Action.ORDER_PENDING if pending else Action.ORDER_REJECTED,
+                        cycle_id=cycle_id,
+                        structure=str(family),
+                        rationale=(
+                            f"Alpaca reports {resolution.order.status} with "
+                            f"{resolution.order.filled_qty}/{size.contracts} contracts filled; "
+                            "the entry is not recorded as an open position."
+                        ),
+                        contracts=size.contracts,
+                        reject_reason="entry_pending" if pending else "entry_not_filled",
+                        outcome=outcome,
+                        extra={"client_order_id": client_order_id},
+                    )
+                )
             raise DataError(
                 f"entry {order.id} was not fully filled: {resolution.order.status} "
                 f"{resolution.order.filled_qty}/{size.contracts}"
@@ -649,6 +710,165 @@ class Agent:
             )
         )
         result.orders.append({"family": str(family), "order_id": str(resolution.order.id)})
+
+    def _retry_entry(
+        self, cycle_id, family, best, original_size, probability, source, result, context
+    ) -> bool:
+        """Retry a canceled entry only from fresh quotes and fresh risk arithmetic."""
+        symbols = [leg.contract.symbol for leg in best.candidate.legs]
+        for attempt, tick in enumerate(self.reprice_ticks, start=1):
+            # A canceled order is not permission to trade on the old state.
+            # Each rung reads a new account, clock, spot, and option quote set.
+            account = self.gateway.account()
+            now, market_open = self.gateway.clock()
+            spot, _ = self.gateway.spot(self.config.str_("underlying.symbol"))
+            retry_context = replace(
+                context,
+                now_exchange=now,
+                market_open=market_open,
+                equity=account.equity,
+                last_equity=account.last_equity,
+                buying_power=account.options_buying_power,
+                spot=spot,
+            )
+            session = run_session_gates(retry_context)
+            if not session.passed:
+                failure = session.first_failure
+                self.ledger.append(
+                    Record(
+                        action=Action.RISK_HALT,
+                        cycle_id=cycle_id,
+                        structure=str(family),
+                        rationale=f"Reprice rung {attempt} refused: {failure.detail}.",
+                        checks=session.as_dicts(),
+                        reject_reason=failure.name,
+                        extra={**self.receipt_context, "reprice_attempt": attempt},
+                    )
+                )
+                return False
+            quotes = self.gateway.option_quotes(symbols)
+            legs = tuple(
+                replace(leg, entry=replace(leg.entry, quote=quotes[leg.contract.symbol]))
+                for leg in best.candidate.legs
+            )
+            candidate = replace(best.candidate, legs=legs)
+            portfolio = PortfolioState(
+                retry_context.equity,
+                retry_context.buying_power,
+                retry_context.open_structures,
+                retry_context.es_in_use,
+            )
+            estimate = evaluate(
+                legs,
+                self.scenarios,
+                self.cost_model,
+                retry_context.spot,
+                1,
+                self.config.float_("risk.es_confidence"),
+            )
+            limit = round(
+                self.cost_model.executable_debit(legs)
+                + tick * self.config.float_("costs.tick_size"),
+                2,
+            )
+            estimate = at_limit(
+                estimate, legs, self.cost_model, limit, self.config.float_("risk.es_confidence")
+            )
+            try:
+                size = size_position(estimate, portfolio, self.config)
+            except UndefinedRiskError:
+                continue
+            gates = run_candidate_gates(retry_context, candidate, estimate, size)
+            if not gates.passed or not size.trades:
+                self.ledger.append(
+                    Record(
+                        action=Action.CANDIDATE_REJECTED,
+                        cycle_id=cycle_id,
+                        structure=str(family),
+                        rationale=f"Reprice rung {attempt} at {limit:.2f} refused: "
+                        f"{gates.first_failure.detail if gates.first_failure else 'size is zero'}",
+                        reject_reason=(
+                            gates.first_failure.name if gates.first_failure else 'size_is_zero'
+                        ),
+                        extra={
+                            **self.receipt_context,
+                            "reprice_attempt": attempt,
+                            "limit_price": limit,
+                        },
+                    )
+                )
+                continue
+            client_id = f"convex-{cycle_id}-{family}-r{attempt}"[:48]
+            self.ledger.append(
+                Record(
+                    action=Action.ORDER_SUBMITTED,
+                    cycle_id=cycle_id,
+                    structure=str(family),
+                    rationale=f"Fresh-quote reprice rung {attempt}: submitting "
+                    f"{size.contracts} lots at {limit:.2f} after all gates passed.",
+                    contracts=size.contracts,
+                    net_price=limit,
+                    checks=gates.as_dicts(),
+                    extra={
+                        **self.receipt_context,
+                        "client_order_id": client_id,
+                        "reprice_attempt": attempt,
+                        "waterfall": estimate.waterfall(),
+                    },
+                )
+            )
+            order = self.gateway.submit_structure(list(legs), size.contracts, limit, client_id)
+            resolution = resolve_order(
+                self.gateway,
+                order,
+                size.contracts,
+                timeout_seconds=self.config.float_("execution.order_status_timeout_seconds"),
+                poll_seconds=self.config.float_("execution.order_poll_seconds"),
+            )
+            outcome = outcome_fields(resolution.order, cancel_requested=resolution.cancel_requested)
+            if resolution.filled:
+                self.ledger.append(
+                    Record(
+                        action=Action.ORDER_FILLED,
+                        cycle_id=cycle_id,
+                        structure=str(family),
+                        rationale=f"Alpaca verified reprice rung {attempt} as fully filled "
+                        f"for {resolution.order.filled_qty} contracts.",
+                        contracts=size.contracts,
+                        legs=candidate.leg_dicts(),
+                        net_price=limit,
+                        cost_breakdown=estimate.cost.as_dict(),
+                        max_loss=round(estimate.profile.max_loss * size.contracts, 2),
+                        es_contribution=round(estimate.expected_shortfall * size.contracts, 2),
+                        outcome=outcome,
+                        extra={
+                            **self.receipt_context,
+                            "client_order_id": client_id,
+                            "reprice_attempt": attempt,
+                        },
+                    )
+                )
+                result.orders.append({"family": str(family), "order_id": str(resolution.order.id)})
+                return True
+            self.ledger.append(
+                Record(
+                    action=Action.ORDER_REJECTED,
+                    cycle_id=cycle_id,
+                    structure=str(family),
+                    rationale=f"Alpaca reports reprice rung {attempt} {resolution.order.status} "
+                    f"with {resolution.order.filled_qty}/{size.contracts} filled.",
+                    contracts=size.contracts,
+                    reject_reason="entry_not_filled",
+                    outcome=outcome,
+                    extra={
+                        **self.receipt_context,
+                        "client_order_id": client_id,
+                        "reprice_attempt": attempt,
+                    },
+                )
+            )
+        return False
+
 
     def _fees_paid(self) -> float:
         """Actual settled fees plus a conservative reserve for open verified entries.

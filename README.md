@@ -152,6 +152,43 @@ cp .env.example .env          # then fill in the paper account's keys
 .venv/bin/python -m scripts.serve            # the dashboard, on :8000
 ```
 
+### Tournament observation profiles
+
+```bash
+.venv/bin/python -m scripts.tournament
+.venv/bin/python -m scripts.tournament --profile trend_vertical
+```
+
+The default is **dry-run only**: it reads the current paper-market data, then
+writes a separate ledger for each profile under `data/tournament/`. Its gateway
+rejects every order write. The profile comparison appears on the dashboard and
+is kept separate from account P&L.
+
+The only submission path is explicit and narrow:
+
+```bash
+.venv/bin/python -m scripts.tournament --submit --profile skew_bwb
+.venv/bin/python -m scripts.tournament --submit --profile execution_bwb
+```
+
+It can submit one atomic, defined-risk BWB to the configured Alpaca **paper**
+account. It uses the canonical account ledger so the normal manager and broker
+reconciliation own the position, preserves every cost/risk gate, and sets the
+concurrency cap to one. Trend Vertical stays observation-only. Execution BWB
+may retry a canceled, zero-fill initial order at one and then two ticks worse,
+but only after taking fresh quotes, account/spot/clock readings, session gates,
+and all candidate gates. A paper trade can still lose.
+
+- **Skew BWB** prices only put/call broken-wing butterflies using the existing
+  variance/skew decision rule.
+- **Execution BWB** uses the same BWB universe. In dry-run it records a
+  two-tick observation plan; with its explicit submission command it can retry
+  only a canceled, zero-fill order and recalculates net edge and all gates at
+  each rung.
+- **Trend vertical** prices a bull-call or bear-put debit vertical only after a
+  15-minute opening-range break and VWAP agree. If they disagree, it records a
+  stand-down rather than guessing.
+
 Deployment artifacts are in `deploy/`: a systemd unit that keeps the dashboard up
 across reboots, bound to loopback and published by nginx which terminates TLS. The
 unit runs with `ProtectSystem=strict` and no access to the agent's credentials: the

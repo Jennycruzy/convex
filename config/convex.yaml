@@ -110,7 +110,7 @@ execution:
   order_poll_seconds: 1
 
 liquidity:
-  max_relative_spread: 0.1280       # MEASURED 2026-09-01 by scripts/calibrate_costs.py
+  max_relative_spread: 0.0513       # MEASURED 2026-09-02 by scripts/calibrate_costs.py
   min_displayed_size: 1             # contracts on the touch
   max_quote_age_seconds: 30         # feature-staleness budget
 
@@ -160,6 +160,33 @@ structures:
   # finding that call ratio structures are weaker than put ratio structures.
   enabled: [put_bwb, call_bwb, straddle, strangle, debit_vertical]
   tie_break_order: [put_bwb, debit_vertical, straddle, strangle, call_bwb]
+
+# The tournament runner is dry-run only. These profiles are intentionally
+# separate from the main strategy configuration; invoking it cannot submit an
+# order, and each profile has its own ledger for a side-by-side dashboard view.
+tournament:
+  profiles:
+    skew_bwb:
+      label: Skew BWB
+      description: Directional broken-wing butterflies selected by the existing skew/variance rule.
+      families: [put_bwb, call_bwb]
+      fill_ladder_ticks: []
+      ledger: data/tournament/skew_bwb/decisions.jsonl
+    execution_bwb:
+      label: Execution BWB
+      description: The same BWB universe with a recorded, bounded fill-ladder observation plan.
+      families: [put_bwb, call_bwb]
+      fill_ladder_ticks: [0, 1, 2]
+      ledger: data/tournament/execution_bwb/decisions.jsonl
+    trend_vertical:
+      label: Trend vertical
+      description: Defined-risk debit verticals only after an opening-range break agrees with VWAP.
+      families: [debit_vertical]
+      fill_ladder_ticks: []
+      ledger: data/tournament/trend_vertical/decisions.jsonl
+  trend:
+    opening_range_minutes: 15
+    min_vwap_distance_pct: 0.0005
 
 paths:
   ledger: data/ledger/decisions.jsonl

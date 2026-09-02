@@ -232,6 +232,76 @@ def _backtest_panel(report: dict) -> str:
     return "".join(body)
 
 
+def _tournament_rows(settings: Config) -> list[dict[str, Any]]:
+    """Read profile ledgers without mixing their dry-run evidence into account P&L."""
+    configured = settings.get("tournament.profiles")
+    if not isinstance(configured, dict):
+        return []
+    rows: list[dict[str, Any]] = []
+    for name, profile in configured.items():
+        if not isinstance(profile, dict):
+            continue
+        path = settings.path_(f"tournament.profiles.{name}.ledger")
+        records = read.load(path)
+        summary = read.summarise(records)
+        dry_runs = sum(1 for record in records if record.get("action") == Action.DRY_RUN.value)
+        latest = max((str(record.get("ts", "")) for record in records), default=None)
+        observations = [record.get("execution_observation") for record in records]
+        ladder = next((item for item in reversed(observations) if item), None)
+        rows.append({
+            "name": str(name),
+            "label": str(profile.get("label", name)),
+            "description": str(profile.get("description", "")),
+            "ledger": str(path),
+            "cycles": summary.cycles,
+            "dry_runs": dry_runs,
+            "refusals": summary.refusals,
+            "verified_fills": summary.orders,
+            "realised_pnl": summary.realised_pnl,
+            "last_seen": latest,
+            "fill_ladder": ladder,
+        })
+    return rows
+
+
+def _tournament_panel(rows: list[dict[str, Any]]) -> str:
+    """The side-by-side profile view, visibly separate from account receipts."""
+    if not any(row["cycles"] or row["dry_runs"] for row in rows):
+        return ""
+    body = [
+        _section("tournament", "PAPER TOURNAMENT — OBSERVATION ONLY"),
+        (
+            "<p>These are isolated profile ledgers. The tournament runner uses a gateway "
+            "that rejects every order submission, so proposals below are not fills and "
+            "do not change account P&amp;L.</p>"
+        ),
+        "<div class='panel scroll-x reveal'><table><thead><tr>",
+    ]
+    for column in ("profile", "cycles", "proposals", "refusals", "verified fills", "realised p&l", "last receipt"):
+        body.append(f"<th>{column}</th>")
+    body.append("</tr></thead><tbody>")
+    for row in rows:
+        pnl = float(row["realised_pnl"])
+        tone = "good" if pnl > 0 else ("bad" if pnl < 0 else "")
+        body.append(
+            f"<tr><td><strong>{escape(row['label'])}</strong><br><span class='faint'>"
+            f"{escape(row['description'])}</span></td>"
+            f"<td class='num'>{row['cycles']}</td><td class='num'>{row['dry_runs']}</td>"
+            f"<td class='num'>{row['refusals']}</td><td class='num'>{row['verified_fills']}</td>"
+            f"<td class='num {tone}'>{pnl:+,.2f}</td>"
+            f"<td>{escape(row['last_seen'] or '·')}</td></tr>"
+        )
+        ladder = row.get("fill_ladder")
+        if ladder:
+            values = ", ".join(f"{float(value):.2f}" for value in ladder.get("ladder_limits", []))
+            body.append(
+                f"<tr><td colspan='7' class='faint'>Execution observation ladder: "
+                f"{escape(values)}. It is a dry-run plan, not an order instruction.</td></tr>"
+            )
+    body.append("</tbody></table></div>")
+    return "".join(body)
+
+
 def _realised_panel(records, summary) -> str:
     """What the account itself earned, drawn only where the ledger says so."""
     gross_curve, net_curve = read.realised_curve(records)
@@ -332,6 +402,10 @@ def create_app(config: Config | None = None) -> FastAPI:
     def api_sensitivity() -> JSONResponse:
         return JSONResponse(sensitivity())
 
+    @app.get("/api/tournament")
+    def api_tournament() -> JSONResponse:
+        return JSONResponse(_tournament_rows(settings))
+
     @app.get("/", response_class=HTMLResponse)
     def index(request: Request) -> HTMLResponse:
         rows = records()
@@ -404,6 +478,8 @@ def create_app(config: Config | None = None) -> FastAPI:
             )
         )
         body.append("</div>")
+
+        body.append(_tournament_panel(_tournament_rows(settings)))
 
         latest = read.waterfalls(rows)
         if latest:

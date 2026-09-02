@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime, time, timezone
+from datetime import UTC, date, datetime, time
 
 import numpy as np
 import pytest
 
 from convex.config import load
 from convex.costs import CostModel
-from convex.edge import evaluate, expected_shortfall
+from convex.edge import at_limit, evaluate, expected_shortfall
 from convex.instruments import Right
 from convex.scenarios import ScenarioSet
 from convex.structures.base import chain_index
@@ -32,7 +32,7 @@ def scenarios():
         entry_time=time(10, 0),
         exit_time=time(16, 0),
         volatility_scale=1.0,
-        built_at=datetime.now(timezone.utc),
+        built_at=datetime.now(UTC),
     )
 
 
@@ -99,7 +99,7 @@ def test_a_wide_spread_can_turn_a_positive_gross_edge_negative(config):
         entry_time=time(10, 0),
         exit_time=time(16, 0),
         volatility_scale=1.0,
-        built_at=datetime.now(timezone.utc),
+        built_at=datetime.now(UTC),
     )
     wide = [
         leg(650.0, Right.PUT, 2.50, 3.60, +1),
@@ -110,3 +110,16 @@ def test_a_wide_spread_can_turn_a_positive_gross_edge_negative(config):
     assert estimate.gross_edge > 0.0
     assert estimate.net_edge < 0.0
     assert estimate.cost_share_of_gross > 1.0
+
+
+def test_a_worse_limit_reduces_edge_and_increases_the_tail(test_chain, config, scenarios):
+    model = CostModel.from_config(config)
+    candidate = put_broken_wing_butterflies(chain_index(test_chain), config, 650.0)[0]
+    estimate = evaluate(candidate.legs, scenarios, model, 650.0, 1, 0.01)
+    worse_limit = model.executable_debit(candidate.legs) + 0.02
+
+    repriced = at_limit(estimate, candidate.legs, model, worse_limit, 0.01)
+
+    assert repriced.net_edge == pytest.approx(estimate.net_edge - 2.0)
+    assert repriced.profile.max_loss == pytest.approx(estimate.profile.max_loss + 2.0)
+    assert repriced.expected_shortfall >= estimate.expected_shortfall
