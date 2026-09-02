@@ -9,6 +9,7 @@ from convex.instruments import Right
 from convex.payoff import payoff_at, upside_slope
 from convex.structures import Family, build_candidates
 from convex.structures.base import chain_index
+from tests.conftest import build_test_chain
 from convex.structures.builders import (
     call_broken_wing_butterflies,
     debit_verticals,
@@ -72,3 +73,42 @@ def test_every_enabled_family_produces_candidates_within_the_cap(test_chain, con
     for family, candidates in built.items():
         assert candidates, f"{family} produced nothing"
         assert len(candidates) <= cap
+
+
+def test_the_premium_floor_keeps_the_pennies_out_of_every_structure(test_chain, config):
+    """Law 7 reaches candidate construction, not only the checks after it.
+
+    A leg quoted at a few cents on an expiration day carries a relative spread
+    an order of magnitude past the strategy's break-even. Structures built out
+    of one are refused downstream, having first taken up room in the ranking.
+    """
+    floor = config.float_("candidates.min_leg_premium")
+    assert floor > 0.0
+
+    built = build_candidates(test_chain, config, 650.0)
+
+    mids = {
+        (leg.contract.right, leg.contract.strike)
+        for candidates in built.values()
+        for candidate in candidates
+        for leg in candidate.legs
+    }
+    by_key = {(row.contract.right, row.contract.strike): row for row in test_chain}
+    for key in mids:
+        quote = by_key[key].quote
+        assert (quote.bid + quote.ask) / 2.0 >= floor, f"{key} is below the floor"
+
+
+def test_a_leg_quoted_on_one_side_only_is_never_built_on(config):
+    from convex.structures.builders import tradeable_legs
+
+    chain = build_test_chain()
+    one_sided = [row for row in chain if row.contract.strike == 650.0]
+    assert one_sided
+    for row in one_sided:
+        object.__setattr__(row.quote, "bid", 0.0)
+
+    kept = tradeable_legs(chain, 0.0)
+
+    assert all(row.quote.bid > 0.0 and row.quote.ask > 0.0 for row in kept)
+    assert len(kept) == len(chain) - len(one_sided)

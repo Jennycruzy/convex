@@ -215,6 +215,36 @@ _BUILDERS = {
 }
 
 
+def tradeable_legs(chain: Iterable, floor: float) -> list:
+    """The legs worth building a structure out of on an expiration day.
+
+    Two exclusions, both of them about the same thing. A leg quoted on one side
+    only cannot be traded in the direction that has no quote, and its mid is
+    half the other side by construction, so it prices as though it were cheap
+    when in fact nobody is making a market in it.
+
+    A leg worth less than the floor is where an 0DTE book stops being a market.
+    On the 1 September SPY chain the 27 legs quoted under a quarter carry a
+    median relative spread of 14.29 percent, against 1.33 percent for the 69
+    legs above it, and the break-even for this whole strategy sits between 1.0
+    and 1.5 percent. Structures built out of those legs are refused later on
+    liquidity or on cost, having first crowded the ranking that decides what is
+    considered at all. Declining to build them is not a loosened check. It is
+    the oldest rule on an expiration day: do not trade the pennies.
+    """
+    if floor < 0.0:
+        raise DataError(f"candidates.min_leg_premium may not be negative, found {floor}")
+    kept = []
+    for row in chain:
+        quote = row.quote
+        if quote.bid <= 0.0 or quote.ask <= 0.0:
+            continue
+        if (quote.bid + quote.ask) / 2.0 < floor:
+            continue
+        kept.append(row)
+    return kept
+
+
 def build_candidates(
     chain: Iterable, config: Config, spot: float
 ) -> dict[Family, list[Candidate]]:
@@ -223,8 +253,15 @@ def build_candidates(
     The per-family cap keeps enumeration bounded on a chain with hundreds of
     strikes. It trims the widest structures first, since those carry the most
     cost per unit of exposure, and the trim is reported by the caller.
+
+    The cap is why the premium floor changes more than it looks like it should.
+    Removing the pennies does not only remove the structures that contain one,
+    it changes which candidates fall inside the narrowest ``cap`` of them, and
+    the survivors are better on the measured chain rather than merely fewer.
+    That second effect is an interaction with the cap and is worth knowing when
+    reading a before and after.
     """
-    index = chain_index(chain)
+    index = chain_index(tradeable_legs(chain, config.float_("candidates.min_leg_premium")))
     enabled = [Family(name) for name in config.list_("structures.enabled")]
     cap = config.int_("candidates.max_candidates_per_structure")
     if cap <= 0:

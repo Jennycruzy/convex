@@ -75,6 +75,14 @@ candidates:
   # ranking is net of cost and the tail of it is not worth opening.
   max_ranked_attempts: 25
   max_candidates_per_structure: 400
+  # The cheapest leg worth building a structure out of, in dollars of mid.
+  # MEASURED 2026-09-02 on the recorded 1 September SPY 0DTE chain: the 27 legs
+  # quoted under 0.25 carry a median relative spread of 14.29 percent, against
+  # 1.33 percent for the 69 legs above it. The break-even for the strategy sits
+  # between 1.0 and 1.5 percent, so the cheap legs are an order of magnitude the
+  # wrong side of it and every structure containing one is refused downstream
+  # anyway. This declines to build them rather than pricing and refusing them.
+  min_leg_premium: 0.25
 
 costs:
   # Law 7. Populated by scripts/calibrate_costs.py against real SPY 0DTE quotes.
