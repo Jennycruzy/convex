@@ -104,6 +104,7 @@ TAGS = {
     Action.POSITION_RECONCILED.value: ("reconciled close", "stood"),
     Action.SNAPSHOT.value: ("snapshot", "stood"),
     Action.CALIBRATION.value: ("calibration", "stood"),
+    Action.CORRECTION.value: ("correction", "stood"),
 }
 
 

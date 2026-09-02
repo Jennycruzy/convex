@@ -50,6 +50,12 @@ class Action(StrEnum):
     RISK_HALT = "risk_halt"
     CALIBRATION = "calibration"
     SNAPSHOT = "snapshot"
+    # A statement about the log itself rather than about the market: a receipt
+    # that was wrong, or a property of the file that needs explaining to whoever
+    # audits it. Append-only means a mistake is answered by a later record and
+    # never by editing the earlier one. Deliberately not a decision, so it does
+    # not count towards refusals, stand downs or halts.
+    CORRECTION = "correction"
 
 
 @dataclass(frozen=True)

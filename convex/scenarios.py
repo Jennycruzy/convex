@@ -243,3 +243,51 @@ def save(scenarios: ScenarioSet, directory: Path) -> Path:
     )
     path.with_suffix(".json").write_text(json.dumps(scenarios.describe(), indent=2))
     return path
+
+
+def load(path: Path, config: Config) -> ScenarioSet:
+    """Read back an archived scenario set for replay.
+
+    Not a perfect round trip, and the two places it is lossy are worth naming.
+    describe() writes volatility_scale rounded to four places, so a replayed
+    distribution is scaled to within a ten thousandth of the one the decision
+    saw rather than to the bit. The entry and exit times are not written at all,
+    because build() takes them from the configuration; they are read back the
+    same way, which is faithful as long as the session window has not been
+    edited since the archive was made. Neither moves a candidate across the
+    cost threshold this is used to measure, and pretending the file carried
+    them would be worse than saying where they came from.
+    """
+    payload = np.load(path)
+    for key in ("log_returns", "source_days"):
+        if key not in payload:
+            raise DataError(f"{path} carries no {key} array")
+    meta_path = path.with_suffix(".json")
+    if not meta_path.exists():
+        raise DataError(f"{path} has no {meta_path.name} beside it")
+    meta = json.loads(meta_path.read_text())
+    if "volatility_scale" not in meta:
+        raise DataError(f"{meta_path} records no volatility_scale")
+    stamp = path.stem.removeprefix("scenarios-")
+    try:
+        # Naive on purpose. save() stamps the filename with strftime, which
+        # writes no zone, so there is none to read back and inventing one would
+        # be a worse answer than carrying the ambiguity the archive has.
+        built_at = datetime.strptime(stamp, "%Y%m%dT%H%M%S")  # noqa: DTZ007
+    except ValueError as error:
+        raise DataError(f"{path} is not a recognisable scenario archive name") from error
+    return ScenarioSet(
+        log_returns=payload["log_returns"],
+        source_days=tuple(date.fromisoformat(str(day)) for day in payload["source_days"]),
+        entry_time=_parse_time(config.str_("session.entry_time")),
+        exit_time=_parse_time(config.str_("session.close_time")),
+        volatility_scale=float(meta["volatility_scale"]),
+        built_at=built_at,
+    )
+
+
+def archived(directory: Path) -> list[Path]:
+    """Every archived scenario set, oldest first."""
+    if not directory.is_dir():
+        return []
+    return sorted(directory.glob("scenarios-*.npz"))
