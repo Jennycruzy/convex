@@ -1,6 +1,6 @@
 # CONVEX · one-page write-up
 
-**Alpaca account ID:** `PA35QSFNW15J` (paper, opened 2026-08-28 at exactly $100,000.00, options level 3)
+**Alpaca account ID:** `PA35QSFNW15J` (paper, opened 2026-08-29 00:20 ET at exactly $100,000.00, options level 3). Brand new and dedicated to this hackathon, opened after the 28 August kick off and never used for anything else.
 **Repo:** github.com/Jennycruzy/convex · **Demo:** https://convex.isobars.xyz
 **Instrument:** SPY 0DTE options, paper account, entry 10:00 ET, held to the 16:00 close.
 
