@@ -312,6 +312,32 @@ RECONSTRUCTED_FEATURES: tuple[str, ...] = (
 )
 
 
+def implied_variance(
+    session: ReconstructedSession, entry_at: datetime, close_at: datetime
+) -> tuple[float, float]:
+    """Integrated implied variance up and down at the entry minute.
+
+    Split out of `features` so a caller that wants only the volatility reading
+    is not obliged to supply the lagged realised inputs it does not use. Those
+    have their own guard, correctly: a row built without them would be missing
+    predictors rather than carrying honest ones. Implied variance depends on
+    the rebuilt chain and the time to the close and on nothing else, so it can
+    be asked for on its own, and there is one implementation of it either way.
+    """
+    tau = time_to_close_years(entry_at, close_at)
+    calls = _otm(session.entries, session.spot_at_entry, Right.CALL)
+    puts = _otm(session.entries, session.spot_at_entry, Right.PUT)
+    if len(calls) < 2 or len(puts) < 2:
+        raise DataError(
+            f"{session.session_date}: rebuilt chain has {len(calls)} out-of-the-money "
+            f"calls and {len(puts)} puts; integrated variance needs two on each side"
+        )
+    return (
+        integrated_variance(calls, session.spot_at_entry, tau),
+        integrated_variance(puts, session.spot_at_entry, tau),
+    )
+
+
 def features(
     session: ReconstructedSession,
     entry_at: datetime,
@@ -323,14 +349,7 @@ def features(
     tau = time_to_close_years(entry_at, close_at)
     calls = _otm(session.entries, session.spot_at_entry, Right.CALL)
     puts = _otm(session.entries, session.spot_at_entry, Right.PUT)
-    if len(calls) < 2 or len(puts) < 2:
-        raise DataError(
-            f"{session.session_date}: rebuilt chain has {len(calls)} out-of-the-money "
-            f"calls and {len(puts)} puts; integrated variance needs two on each side"
-        )
-
-    variance_up = integrated_variance(calls, session.spot_at_entry, tau)
-    variance_dn = integrated_variance(puts, session.spot_at_entry, tau)
+    variance_up, variance_dn = implied_variance(session, entry_at, close_at)
     values: dict[str, float] = {
         "iv_total": variance_up + variance_dn,
         "iv_up": variance_up,
