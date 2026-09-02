@@ -182,5 +182,10 @@
       "cost_share_of_gross": null
     }
   },
-  "note": "Replayed on chains recorded by the agent at 10:00 ET. Sharpe figures over 276 sessions are arithmetic, not evidence."
+  "note": "Rebuilt from the option tape, not replayed on chains the agent recorded. The earlier wording claimed recorded chains over 276 sessions when the agent has recorded two chains in its life, which was false and is corrected here without altering a figure. The modelled spread this was priced at is not recorded in the report, so read it against the spread measured on the live chain, 0.1047 on 31 August and 0.1280 on 1 September, before drawing anything from it. Sharpe over 276 sessions is arithmetic, not evidence.",
+  "provenance": {
+    "source": "reconstructed",
+    "modelled_relative_spread": null,
+    "note": "Corrected after publication. The parameters of this run were not recorded in the report itself, so the modelled spread is left null rather than guessed."
+  }
 }

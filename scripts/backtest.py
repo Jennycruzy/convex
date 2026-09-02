@@ -192,10 +192,32 @@ def main() -> int:
         )
         destination.parent.mkdir(parents=True, exist_ok=True)
         payload = report.as_dict()
-        payload["note"] = (
-            "Replayed on chains recorded by the agent at 10:00 ET. Sharpe figures over "
-            f"{sessions} sessions are arithmetic, not evidence."
-        )
+        # Say which of the two this actually is. The sentence used to claim
+        # recorded chains unconditionally, including for a reconstruction, and
+        # the published report carried that claim over 276 sessions when the
+        # agent had recorded two chains in its life. A reader cannot tell a
+        # rebuilt session from a recorded one by looking at the numbers, so the
+        # report has to say, and the modelled spread has to travel with it: a
+        # reconstruction is only as honest as the book it assumes.
+        if arguments.reconstructed:
+            payload["provenance"] = {
+                "source": "reconstructed",
+                "days": arguments.days,
+                "modelled_relative_spread": arguments.relative_spread,
+            }
+            payload["note"] = (
+                f"Rebuilt from the option tape over {arguments.days} days, not replayed on "
+                f"chains the agent recorded, and priced at a modelled relative spread of "
+                f"{arguments.relative_spread:.3f} per leg. Compare that against the spread "
+                f"measured on the live chain before reading any figure below. Sharpe over "
+                f"{sessions} sessions is arithmetic, not evidence."
+            )
+        else:
+            payload["provenance"] = {"source": "recorded_chains"}
+            payload["note"] = (
+                "Replayed on chains recorded by the agent at 10:00 ET. Sharpe figures over "
+                f"{sessions} sessions are arithmetic, not evidence."
+            )
         destination.write_text(json.dumps(payload, indent=2))
         print(f"\nwrote the full report to {destination}")
     return 0
