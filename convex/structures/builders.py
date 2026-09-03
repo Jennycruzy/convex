@@ -245,10 +245,30 @@ def tradeable_legs(chain: Iterable, floor: float) -> list:
     return kept
 
 
+#: Every family that has a builder, in the order they are declared.
+#: ``structures.enabled`` is the live permission list and is a subset of this:
+#: it answers what the agent may open, which is a risk decision and can be
+#: empty. This answers what can be priced at all, which is a property of the
+#: code, and lets an offline measurement stay readable through a stand-down.
+BUILDABLE_FAMILIES = tuple(_BUILDERS)
+
+
 def build_candidates(
-    chain: Iterable, config: Config, spot: float
+    chain: Iterable,
+    config: Config,
+    spot: float,
+    families: Iterable[Family] | None = None,
 ) -> dict[Family, list[Candidate]]:
     """Every candidate in every enabled family, keyed by family.
+
+    ``families`` overrides ``structures.enabled`` and exists for measurement,
+    not for trading. Disabling a family is how this project withdraws a losing
+    idea from the live path, and that setting is currently empty; but the same
+    list also decides what an offline replay is allowed to price, so a
+    stand-down silently erased the evidence for the cost claim rather than
+    merely stopping the trade. Those are two different questions and this
+    separates them. Nothing on the live path passes the argument, so the
+    permission list still governs every order.
 
     The per-family cap keeps enumeration bounded on a chain with hundreds of
     strikes. It trims the widest structures first, since those carry the most
@@ -262,7 +282,10 @@ def build_candidates(
     reading a before and after.
     """
     index = chain_index(tradeable_legs(chain, config.float_("candidates.min_leg_premium")))
-    enabled = [Family(name) for name in config.list_("structures.enabled")]
+    if families is None:
+        enabled = [Family(name) for name in config.list_("structures.enabled")]
+    else:
+        enabled = list(families)
     cap = config.int_("candidates.max_candidates_per_structure")
     if cap <= 0:
         raise DataError(f"candidates.max_candidates_per_structure must be positive, found {cap}")

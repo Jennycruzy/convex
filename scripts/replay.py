@@ -22,8 +22,17 @@ morning against a distribution built later in the day would leak the afternoon
 into it. So this measures what cost does to a real SPY 0DTE book, which is the
 claim being made, and it does not reproduce any single recorded decision.
 
+It prices every family that has a builder, not the families
+``structures.enabled`` currently permits. Those are separate questions. The
+permission list is a live risk decision and is empty at the moment, because the
+2 September audit withdrew every family from trading; reading it here would
+mean a stand-down erased the measurement too, and the table would go blank at
+exactly the moment the claim most needs checking. Cost destroys a candidate
+whether or not the agent is allowed to open it. Pass --families to narrow it.
+
 Run it with:  .venv/bin/python -m scripts.replay
               .venv/bin/python -m scripts.replay --session 2026-09-01
+              .venv/bin/python -m scripts.replay --families put_bwb,straddle
               .venv/bin/python -m scripts.replay --json out.json
 """
 
@@ -41,8 +50,8 @@ from convex.config import load
 from convex.costs import CostModel
 from convex.edge import evaluate
 from convex.errors import ConvexError, DataError, UndefinedRiskError
-from convex.structures.base import Candidate
-from convex.structures.builders import build_candidates
+from convex.structures.base import Candidate, Family
+from convex.structures.builders import BUILDABLE_FAMILIES, build_candidates
 
 
 def pair_scenarios(directory: Path, chain_taken_at, config) -> Path:
@@ -67,7 +76,7 @@ def pair_scenarios(directory: Path, chain_taken_at, config) -> Path:
     return earlier[-1]
 
 
-def replay(session: date, config) -> dict:
+def replay(session: date, config, families=BUILDABLE_FAMILIES) -> dict:
     chain_path = config.path_("paths.chain_archive") / f"chain-{session.isoformat()}.json.gz"
     if not chain_path.exists():
         raise DataError(f"no archived chain for {session.isoformat()} at {chain_path}")
@@ -83,7 +92,7 @@ def replay(session: date, config) -> dict:
         exit_reserve_legs=config.str_("costs.exit_reserve_legs"),
     )
     confidence = config.float_("risk.es_confidence")
-    families = build_candidates(snapshot.entries, config, snapshot.spot)
+    built = build_candidates(snapshot.entries, config, snapshot.spot, families)
 
     report: dict = {
         "session": session.isoformat(),
@@ -91,9 +100,11 @@ def replay(session: date, config) -> dict:
         "scenarios": str(scenario_path),
         "spot": snapshot.spot,
         "expiry": snapshot.expiry.isoformat(),
+        "priced_families": [str(family) for family in families],
+        "min_leg_premium": config.float_("candidates.min_leg_premium"),
         "families": {},
     }
-    for family, candidates in families.items():
+    for family, candidates in built.items():
         priced = []
         unpriceable = 0
         for candidate in candidates:
@@ -142,10 +153,33 @@ def main() -> int:
         "--session",
         help="the archived session to replay, as YYYY-MM-DD. Defaults to the most recent.",
     )
+    parser.add_argument(
+        "--families",
+        help=(
+            "comma-separated families to price. Defaults to every family that has a "
+            "builder, which is deliberately not the structures.enabled permission list."
+        ),
+    )
     parser.add_argument("--json", help="write the full report here as well as printing it")
     arguments = parser.parse_args()
 
     config = load()
+    if arguments.families:
+        names = [name.strip() for name in arguments.families.split(",") if name.strip()]
+        try:
+            families = tuple(Family(name) for name in names)
+        except ValueError as error:
+            raise DataError(
+                f"--families names something that is not a family: {error}. "
+                f"Known families are {', '.join(str(f) for f in BUILDABLE_FAMILIES)}."
+            ) from None
+        unbuildable = [f for f in families if f not in BUILDABLE_FAMILIES]
+        if unbuildable:
+            raise DataError(
+                f"--families names {', '.join(str(f) for f in unbuildable)}, which has no builder"
+            )
+    else:
+        families = BUILDABLE_FAMILIES
     if arguments.session:
         session = date.fromisoformat(arguments.session)
     else:
@@ -157,10 +191,14 @@ def main() -> int:
             )
         session = recorded[-1]
 
-    report = replay(session, config)
+    report = replay(session, config, families)
     print(f"session {report['session']}, spot {report['spot']}, expiry {report['expiry']}")
     print(f"chain     {report['chain']}")
     print(f"scenarios {report['scenarios']}")
+    print(
+        f"pricing   {', '.join(report['priced_families'])} "
+        f"at a {report['min_leg_premium']:g} leg premium floor"
+    )
     print()
     print(f"{'family':16}{'priced':>8}{'consumed':>10}{'share':>8}   worst gross to net")
     total_priced = total_consumed = 0

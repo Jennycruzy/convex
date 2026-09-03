@@ -7,6 +7,6 @@ is the thesis rather than an omission.
 """
 
 from convex.structures.base import Candidate, Family, chain_index
-from convex.structures.builders import build_candidates
+from convex.structures.builders import BUILDABLE_FAMILIES, build_candidates
 
-__all__ = ["Candidate", "Family", "build_candidates", "chain_index"]
+__all__ = ["BUILDABLE_FAMILIES", "Candidate", "Family", "build_candidates", "chain_index"]
