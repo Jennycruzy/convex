@@ -56,7 +56,17 @@ class DryRunGateway:
 def family_results(ledger: Ledger) -> dict[str, list[float]]:
     """Each family's realised results so far, oldest first."""
     history: dict[str, list[float]] = defaultdict(list)
-    for record in ledger.read():
+    records = list(ledger.read())
+    invalidated = {
+        int(sequence)
+        for record in records
+        if record.get("action") == Action.CORRECTION.value
+        for sequence in record.get("invalidates", [])
+        if str(sequence).isdigit()
+    }
+    for record in records:
+        if record.get("seq") in invalidated:
+            continue
         if record.get("action") != Action.POSITION_CLOSED.value:
             continue
         outcome = record.get("outcome") or {}
@@ -71,6 +81,13 @@ def main() -> int:
     arguments = parser.parse_args()
 
     config = load()
+    if config.str_("strategy.active_profile") == "gap_continuation_vertical":
+        # Keep the installed 10:00 ET service, but never let that generic
+        # entrypoint enumerate debit verticals. The isolated runner enables
+        # the sole family only in memory after its deterministic signal fires.
+        from scripts.run_gap_continuation import main as run_gap_continuation
+
+        return run_gap_continuation()
     live = AlpacaGateway(config)
     ledger = Ledger(config.path_("paths.ledger"))
 

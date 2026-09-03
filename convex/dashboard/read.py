@@ -83,10 +83,25 @@ class Summary:
         return self.refusals / considered if considered else 0.0
 
 
+def invalidated_sequences(records: Iterable[dict[str, Any]]) -> set[int]:
+    """Receipt sequence numbers superseded by append-only corrections."""
+    invalidated: set[int] = set()
+    for record in records:
+        if record.get("action") != Action.CORRECTION.value:
+            continue
+        for sequence in record.get("invalidates", []):
+            try:
+                invalidated.add(int(sequence))
+            except (TypeError, ValueError):
+                continue
+    return invalidated
+
+
 def summarise(records: Iterable[dict[str, Any]]) -> Summary:
     rows = list(records)
     if not rows:
         return Summary()
+    invalidated = invalidated_sequences(rows)
 
     cycles = {row.get("cycle_id") for row in rows if row.get("cycle_id")}
     counts = {action: 0 for action in Action}
@@ -107,7 +122,10 @@ def summarise(records: Iterable[dict[str, Any]]) -> Summary:
             submissions[(str(row.get("cycle_id")), str(row.get("structure")))] = row
         if action == Action.CANDIDATE_REJECTED.value and row.get("reject_reason") == "net_of_cost":
             cost_refusals += 1
-        if action in {Action.POSITION_CLOSED.value, Action.POSITION_RECONCILED.value}:
+        if (
+            row.get("seq") not in invalidated
+            and action in {Action.POSITION_CLOSED.value, Action.POSITION_RECONCILED.value}
+        ):
             if "realised_pnl" in outcome:
                 realised += float(outcome["realised_pnl"])
                 settled += 1
@@ -194,7 +212,10 @@ class Cycle:
     @property
     def opened(self) -> int:
         return sum(
-            1 for record in self.records if record.get("action") == Action.ORDER_SUBMITTED.value
+            1
+            for record in self.records
+            if record.get("action") == Action.ORDER_FILLED.value
+            and str((record.get("outcome") or {}).get("status", "")).lower() == "filled"
         )
 
     @property
@@ -264,11 +285,15 @@ def realised_curve(records: Iterable[dict[str, Any]]) -> tuple[list[float], list
     principle as the cost totals above: a receipt missing its number is not a
     zero.
     """
+    rows = list(records)
+    invalidated = invalidated_sequences(rows)
     gross_running = 0.0
     net_running = 0.0
     gross_curve: list[float] = []
     net_curve: list[float] = []
-    for row in records:
+    for row in rows:
+        if row.get("seq") in invalidated:
+            continue
         if row.get("action") not in {
             Action.POSITION_CLOSED.value,
             Action.POSITION_RECONCILED.value,

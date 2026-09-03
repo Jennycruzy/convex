@@ -22,6 +22,7 @@ transport it is on.
 from __future__ import annotations
 
 import os
+from math import gcd
 import time as wall_time
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
@@ -658,6 +659,52 @@ class AlpacaGateway:
                 },
             )
         )
+
+    def close_structure(
+        self,
+        positions: Sequence[tuple[str, int]],
+        limit_price: float,
+        client_order_id: str,
+    ) -> OrderRecord:
+        """Close a whole defined-risk structure as one atomic multi-leg order.
+
+        The signed quantities come from the broker position snapshot: positive
+        quantities are sold to close and negative quantities are bought to
+        close. Refusing an unmatched or non-integral group is intentional. A
+        leg-by-leg fallback could destroy the structure's bounded payoff.
+        """
+        if not 2 <= len(positions) <= 4:
+            raise ExecutionError(
+                f"refusing an atomic close with {len(positions)} legs; expected two to four"
+            )
+        quantities = [abs(quantity) for _, quantity in positions]
+        if any(quantity == 0 for quantity in quantities):
+            raise ExecutionError("refusing an atomic close with a zero-quantity leg")
+        contracts = quantities[0]
+        for quantity in quantities[1:]:
+            contracts = gcd(contracts, quantity)
+        if contracts <= 0 or any(quantity % contracts for quantity in quantities):
+            raise ExecutionError("position quantities do not form an integral multi-leg structure")
+        if not client_order_id:
+            raise ExecutionError("refusing an atomic close without a client order id")
+        payload = {
+            "qty": str(contracts),
+            "type": "limit",
+            "time_in_force": "day",
+            "order_class": "mleg",
+            "limit_price": f"{limit_price:.2f}",
+            "client_order_id": client_order_id,
+            "legs": [
+                {
+                    "symbol": symbol,
+                    "ratio_qty": str(abs(quantity) // contracts),
+                    "side": "sell" if quantity > 0 else "buy",
+                    "position_intent": "sell_to_close" if quantity > 0 else "buy_to_close",
+                }
+                for symbol, quantity in positions
+            ],
+        }
+        return _order_record(self._client.call("place_option_order", payload))
 
     def order(self, order_id: str) -> OrderRecord:
         return _order_record(self.order_raw(order_id))

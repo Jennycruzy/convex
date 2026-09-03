@@ -54,7 +54,6 @@ def waterfall_svg(waterfall: dict[str, float], width: int = 720, height: int = 3
     if missing:
         raise ValueError(f"the waterfall is missing {missing}")
 
-    gross = float(waterfall["gross_edge"])
     net = float(waterfall["net_edge"])
     steps = [(key, label, float(waterfall[key])) for key, label in COMPONENTS]
 
@@ -67,7 +66,10 @@ def waterfall_svg(waterfall: dict[str, float], width: int = 720, height: int = 3
     top, bottom = max(levels + [0.0]), min(levels + [0.0])
     span = (top - bottom) or 1.0
 
-    pad_left, pad_top, pad_bottom = 70, 26, 46
+    # Reserve separate rows below the plot for negative values and category
+    # labels. Without this, an exit-reserve value can collide with the adjacent
+    # net-edge label when both finish at the same level.
+    pad_left, pad_top, pad_bottom = 70, 26, 66
     plot_height = height - pad_top - pad_bottom
     plot_width = width - pad_left - 20
     slot = plot_width / len(steps)
@@ -77,9 +79,10 @@ def waterfall_svg(waterfall: dict[str, float], width: int = 720, height: int = 3
         return pad_top + (top - value) / span * plot_height
 
     baseline = y_of(0.0)
+    verdict = "cost exceeded the edge" if net < 0 else "edge survived the cost"
     parts: list[str] = [
         f'<svg viewBox="0 0 {width} {height}" role="img" '
-        f'aria-label="execution cost against gross edge" class="chart">',
+        f'aria-label="execution cost against gross edge; {verdict}" class="chart">',
         f'<line x1="{pad_left - 8}" y1="{baseline:.1f}" x2="{width - 14}" y2="{baseline:.1f}" '
         f'class="axis"/>',
     ]
@@ -106,21 +109,14 @@ def waterfall_svg(waterfall: dict[str, float], width: int = 720, height: int = 3
             f'height="{bar_height:.1f}" rx="2" class="{css}"/>'
         )
         centre = x + bar_width / 2
-        label_y = y_top - 7 if end >= start else y_bottom + 15
+        label_y = y_top - 7 if end >= start else y_bottom + 16
         parts.append(
             f'<text x="{centre:.1f}" y="{label_y:.1f}" class="bar-value">{_money(value)}</text>'
         )
         parts.append(
-            f'<text x="{centre:.1f}" y="{height - 24}" class="bar-label">{escape(label)}</text>'
+            f'<text x="{centre:.1f}" y="{height - 12}" class="bar-label">{escape(label)}</text>'
         )
 
-    verdict = (
-        "cost exceeded the edge" if net < 0 else "edge survived the cost"
-    )
-    parts.append(
-        f'<text x="{pad_left - 12}" y="{pad_top - 10}" class="chart-note" '
-        f'text-anchor="start">gross {_money(gross)} → net {_money(net)} · {verdict}</text>'
-    )
     parts.append("</svg>")
     return "".join(parts)
 

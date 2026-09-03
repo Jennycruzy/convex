@@ -75,6 +75,18 @@ OWN_RESULT_FEATURES: tuple[str, ...] = ("pnl_lag1", "pnl_mean5", "pnl_std5")
 # The realised-moment features are undefined below this many prior sessions.
 _MINIMUM_PRIOR_SESSIONS = 5
 
+# Live entry families may intentionally be empty while a replacement strategy is
+# being researched. Training still needs an explicit universe in that state;
+# otherwise disabling live risk silently disables the research that could
+# replace it. This list is used only by build_samples, never by the live agent.
+_RESEARCH_FAMILIES: tuple[Family, ...] = (
+    Family.PUT_BWB,
+    Family.CALL_BWB,
+    Family.STRADDLE,
+    Family.STRANGLE,
+    Family.DEBIT_VERTICAL,
+)
+
 
 # What a session rebuilt from the tape cannot supply, because the book that
 # produced it is gone: the open-interest exposure proxy and the three liquidity
@@ -196,16 +208,28 @@ def build_samples(
     if not snapshots:
         return []
     cost_model = CostModel.from_config(config)
-    tie_break = [str(name) for name in config.list_("structures.tie_break_order")]
+    enabled = [str(name) for name in config.list_("structures.enabled")]
+    if enabled:
+        research_config = config
+    else:
+        # `structures.enabled` is the live permission list, not the research
+        # universe. When live entries are halted, keep research able to test
+        # every builder without granting the runner permission to trade them.
+        enabled = [family.value for family in _RESEARCH_FAMILIES]
+        research_config = config.with_overrides(
+            {
+                "structures.enabled": enabled,
+                "structures.tie_break_order": enabled,
+            }
+        )
+    tie_break = [str(name) for name in research_config.list_("structures.tie_break_order")]
     confidence = config.float_("risk.es_confidence")
 
-    # Every enabled family is seeded with an empty history so its lagged
+    # Every research family is seeded with an empty history so its lagged
     # columns exist from the first session onward. Without this the first day
     # produces a narrower feature row than the second, which is a shape bug
     # that would only surface once a model was already fitted.
-    history: dict[str, list[float]] = {
-        str(name): [] for name in config.list_("structures.enabled")
-    }
+    history: dict[str, list[float]] = {name: [] for name in enabled}
     samples: list[Sample] = []
 
     # The realised-moment features need sessions before the one being labelled.
@@ -250,7 +274,7 @@ def build_samples(
         )
 
         for family, candidates in build_candidates(
-            snapshot.entries, config, snapshot.spot
+            snapshot.entries, research_config, snapshot.spot
         ).items():
             priced = [
                 (

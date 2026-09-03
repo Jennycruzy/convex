@@ -130,6 +130,8 @@ class Agent:
         candidate_filter: Callable[[Candidate], bool] | None = None,
         receipt_context: dict | None = None,
         reprice_ticks: tuple[int, ...] = (),
+        decision_probability: float | None = None,
+        decision_source: str | None = None,
     ) -> None:
         self.gateway = gateway
         self.config = config
@@ -143,6 +145,10 @@ class Agent:
         self.candidate_filter = candidate_filter
         self.receipt_context = receipt_context or {}
         self.reprice_ticks = tuple(tick for tick in reprice_ticks if tick > 0)
+        if decision_probability is not None and not 0.0 <= decision_probability <= 1.0:
+            raise DataError("decision_probability must lie between zero and one")
+        self.decision_probability = decision_probability
+        self.decision_source = decision_source
         self.max_attempts = config.int_("candidates.max_ranked_attempts")
         self.zone = ZoneInfo(config.str_("session.timezone"))
 
@@ -196,6 +202,11 @@ class Agent:
     def _probability(
         self, family: Family, snapshot: feature_engine.FeatureSet, variance_history: Sequence[float]
     ) -> tuple[float, str]:
+        if self.decision_probability is not None:
+            return (
+                self.decision_probability,
+                self.decision_source or "active deterministic strategy profile",
+            )
         model = self.models.get(family)
         if model is not None:
             return model.probability(snapshot.vector(model.feature_names)), "classifier"

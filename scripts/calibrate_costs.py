@@ -18,10 +18,12 @@ blocking provenance list, which is the step that would otherwise be a hand edit
 minutes before an entry.
 
 Only `liquidity.max_relative_spread` is written, because it is the only one of
-the checked inputs a chain snapshot can settle. Slippage is a fill against the
-mid it was sent at, both fees arrive on the account's activity record, and the
-pin band needs a real close watched. Those stay conservative bounds until a
-trade exists to measure them from.
+the checked inputs a chain snapshot can settle. This is the observed book
+statistic; the separate `liquidity.admission_spread_cap` is a validated P&L
+policy ceiling and is never rewritten by calibration. Slippage is a fill
+against the mid it was sent at, both fees arrive on the account's activity
+record, and the pin band needs a real close watched. Those stay conservative
+bounds until a trade exists to measure them from.
 
 Run it with:  .venv/bin/python -m scripts.calibrate_costs
               .venv/bin/python -m scripts.calibrate_costs --write
@@ -46,7 +48,8 @@ from convex.structures import build_candidates
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
-# The one checked input a chain snapshot can settle on its own.
+# The one checked input a chain snapshot can settle on its own. This is the
+# observed book statistic, not the stricter P&L admission policy cap.
 MEASURED_KEY = "liquidity.max_relative_spread"
 
 # Below this many quoted legs a median is three contracts and a rounding error,

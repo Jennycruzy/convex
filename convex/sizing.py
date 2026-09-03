@@ -87,8 +87,11 @@ def size_position(
 
     risk_pct = config.float_("risk.risk_pct_per_structure")
     es_cap_pct = config.float_("risk.portfolio_es_cap_pct")
+    max_contracts = config.int_("risk.max_contracts_per_structure")
     if not 0.0 < risk_pct < 1.0 or not 0.0 < es_cap_pct < 1.0:
         raise ConfigError("risk fractions must lie strictly between 0 and 1")
+    if max_contracts <= 0:
+        raise ConfigError("risk.max_contracts_per_structure must be positive")
 
     max_loss = estimate.profile.max_loss
     if max_loss <= 0.0:
@@ -110,6 +113,7 @@ def size_position(
         "risk_budget": by_risk,
         "portfolio_tail": by_tail,
         "buying_power": by_buying_power,
+        "profile_contract_cap": max_contracts,
     }
     binding = min(limits, key=lambda name: limits[name])
     contracts = max(0, min(limits.values()))

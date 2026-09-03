@@ -20,18 +20,18 @@ contract overnight. That is not a small difference in a footnote; it is the
 single largest structural risk introduced by moving the paper's protocol onto
 an instrument Alpaca actually lists.
 
-Order of operations inside any flatten: shorts first, then longs. Closing a
-short can only reduce the worst case. Closing a long first would leave a naked
-short standing in the account for as long as the next order takes to fill, and
-there is no window in which this agent is allowed to hold undefined risk.
+Every early exit is an atomic multi-leg close. A leg-by-leg fallback is
+forbidden: it can turn a defined-risk payoff into a different exposure while
+later orders are rejected or delayed.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from math import gcd
 from datetime import datetime
 from enum import StrEnum
-from typing import Sequence
+from typing import Any, Sequence
 
 from convex.config import Config
 from convex.errors import ConvexError, DataError, ExecutionError
@@ -90,6 +90,37 @@ class ClosePlan:
     def crosses_for(self) -> float:
         """Per-share distance from mid to the limit: the cost of getting out."""
         return abs(self.limit_price - self.quote.mid)
+
+
+@dataclass(frozen=True)
+class StructureClosePlan:
+    """A complete, broker-attributable structure to close in one order."""
+
+    entry_cycle_id: str
+    structure: str
+    legs: tuple[ClosePlan, ...]
+
+    @property
+    def contracts(self) -> int:
+        quantities = [abs(plan.leg.contracts) for plan in self.legs]
+        if not 2 <= len(quantities) <= 4 or any(quantity == 0 for quantity in quantities):
+            raise ExecutionError("an atomic close needs two to four non-zero legs")
+        size = quantities[0]
+        for quantity in quantities[1:]:
+            size = gcd(size, quantity)
+        if size <= 0 or any(quantity % size for quantity in quantities):
+            raise ExecutionError("open quantities do not form an integral structure")
+        return size
+
+    @property
+    def limit_price(self) -> float:
+        """Net debit to exit at the displayed touches; negative is a credit."""
+        size = self.contracts
+        return sum(
+            (-plan.limit_price if plan.leg.contracts > 0 else plan.limit_price)
+            * (abs(plan.leg.contracts) / size)
+            for plan in self.legs
+        )
 
 
 @dataclass
@@ -168,12 +199,12 @@ def legs_to_close(
     spot: float,
     pin_band: float,
 ) -> list[OpenLeg]:
-    """Which legs this pass closes, shorts first.
+    """Which legs make their entire attributed structure require an atomic exit.
 
-    The kill switch and the loss limit take everything. The assignment guard on
-    its own takes only what would settle into shares, and leaves a long leg
-    that is safely out of the money to expire worthless, because paying a
-    half-spread to close something already worth nothing is a donation.
+    The kill switch and loss limit select every leg. The assignment guard
+    selects the legs that could settle into shares; the manager then expands
+    that signal to the complete, broker-attributed multi-leg structure rather
+    than sending any selected leg by itself.
     """
     if not triggers:
         return []
@@ -183,9 +214,9 @@ def legs_to_close(
     selected = [
         leg for leg in legs if flatten or leg.settles_into_shares(spot, pin_band)
     ]
-    # Shorts first: closing one can only narrow the worst case, and no ordering
-    # of these orders may ever leave a short standing without its wing.
-    return sorted(selected, key=lambda leg: (not leg.is_short, leg.symbol))
+    # This is a trigger set, not an execution sequence. The manager sends the
+    # complete structure in one broker order.
+    return sorted(selected, key=lambda leg: leg.symbol)
 
 
 class PositionManager:
@@ -254,8 +285,42 @@ class PositionManager:
                 )
             )
 
+    def _verified_entry_for(self, legs: Sequence[OpenLeg]) -> dict[str, Any]:
+        """Match the whole broker position to one verified entry receipt.
+
+        This manager is deliberately limited to one concurrent structure. If
+        the position cannot be matched exactly, it stops and asks for review
+        rather than guessing which legs may safely be combined or closed.
+        """
+        actual = {leg.symbol: leg.contracts for leg in legs}
+        for record in reversed(list(self.ledger.read())):
+            if record.get("action") != Action.ORDER_FILLED.value or not record.get("legs"):
+                continue
+            outcome = record.get("outcome") or {}
+            try:
+                contracts = int(record["contracts"])
+                filled = int(float(outcome.get("filled_qty", 0)))
+            except (KeyError, TypeError, ValueError):
+                continue
+            if (
+                contracts <= 0
+                or filled != contracts
+                or str(outcome.get("status", "")).lower() != "filled"
+            ):
+                continue
+            expected = {
+                str(item["symbol"]): int(item["ratio"]) * contracts
+                for item in record["legs"]
+            }
+            if expected == actual:
+                return record
+        raise ExecutionError(
+            "open option legs do not exactly match one broker-verified entry; "
+            "refusing a leg-by-leg close"
+        )
+
     def review(self, now: datetime, session_close: datetime) -> ManagerReport:
-        """One pass: read the account, decide, close what has to be closed."""
+        """One pass: read the account, then atomically close an attributed structure."""
         report = ManagerReport(cycle_id=new_cycle_id())
 
         account = self.gateway.account()
@@ -275,9 +340,8 @@ class PositionManager:
 
         pin_band = spot * self.config.float_("session.pin_band_pct")
         targets = legs_to_close(legs, report.triggers, spot, pin_band)
-        report.left_open = [leg.symbol for leg in legs if leg not in targets]
-
         if not targets:
+            report.left_open = [leg.symbol for leg in legs]
             report.reason = (
                 f"{len(legs)} leg(s) open, held to expiry"
                 if not report.triggers
@@ -285,21 +349,48 @@ class PositionManager:
             )
             return report
 
-        quotes = self.gateway.option_quotes([leg.symbol for leg in targets])
-        max_age = self.config.float_("liquidity.max_quote_age_seconds")
-        plans = [
-            ClosePlan(leg, closing_limit(leg, quotes[leg.symbol].require_fresh(max_age, now)),
-                      quotes[leg.symbol])
-            for leg in targets
-        ]
-
         reason = ", ".join(str(trigger) for trigger in report.triggers)
+        try:
+            entry = self._verified_entry_for(legs)
+            quotes = self.gateway.option_quotes([leg.symbol for leg in legs])
+            max_age = self.config.float_("liquidity.max_quote_age_seconds")
+            plan = StructureClosePlan(
+                entry_cycle_id=str(entry["cycle_id"]),
+                structure=str(entry.get("structure") or "structure"),
+                legs=tuple(
+                    ClosePlan(
+                        leg,
+                        closing_limit(leg, quotes[leg.symbol].require_fresh(max_age, now)),
+                        quotes[leg.symbol],
+                    )
+                    for leg in legs
+                ),
+            )
+            # Validate before a receipt says the close was attempted.
+            _ = plan.contracts
+            _ = plan.limit_price
+        except ConvexError as error:
+            detail = f"{error}; the structure remains intact for operator review"
+            self.ledger.append(
+                Record(
+                    action=Action.RISK_HALT,
+                    cycle_id=report.cycle_id,
+                    rationale=f"Could not atomically close {len(legs)} open leg(s) on {reason}: {detail}.",
+                    reject_reason="atomic_close_unavailable",
+                    extra={"targets": [leg.symbol for leg in targets]},
+                )
+            )
+            report.failed.append({"symbol": self.symbol, "error": detail})
+            report.left_open = [leg.symbol for leg in legs]
+            report.reason = detail
+            return report
+
         self.ledger.append(
             Record(
                 action=Action.RISK_HALT,
                 cycle_id=report.cycle_id,
                 rationale=(
-                    f"Closing {len(plans)} of {len(legs)} open leg(s) on {reason}. "
+                    f"Atomically closing {len(plan.legs)} open leg(s) on {reason}. "
                     f"{self.symbol} is at {spot:.2f} with "
                     f"{(session_close - now).total_seconds() / 60.0:.0f} minutes to the close."
                 ),
@@ -308,44 +399,41 @@ class PositionManager:
                     "spot": round(spot, 4),
                     "pin_band": round(pin_band, 4),
                     "day_pnl_pct": round(account.day_pnl_pct, 6),
-                    "targets": [plan.leg.symbol for plan in plans],
+                    "targets": [item.leg.symbol for item in plan.legs],
+                    "entry_cycle_id": plan.entry_cycle_id,
                 },
             )
         )
-
-        for plan in plans:
-            self._close(plan, report)
-        report.reason = f"closed {len(report.closed)} leg(s) on {reason}"
+        self._close_structure(plan, report)
+        report.reason = f"atomically closed {len(plan.legs)} leg(s) on {reason}"
         return report
 
     # ------------------------------------------------------------------ closing
 
-    def _close(self, plan: ClosePlan, report: ManagerReport) -> None:
-        leg = plan.leg
-        client_order_id = f"convex-close-{report.cycle_id}-{leg.symbol}"[:48]
+    def _close_structure(self, plan: StructureClosePlan, report: ManagerReport) -> None:
+        client_order_id = f"convex-close-{report.cycle_id}-{plan.structure}"[:48]
+        limit = round(plan.limit_price, 2)
+        positions = [(item.leg.symbol, item.leg.contracts) for item in plan.legs]
         self.ledger.append(
             Record(
                 action=Action.POSITION_CLOSE_SUBMITTED,
                 cycle_id=report.cycle_id,
-                structure=leg.symbol,
+                structure=plan.structure,
                 rationale=(
-                    f"Submitting a closing limit at {plan.limit_price:.2f} for "
-                    f"{leg.contracts:+d} {leg.symbol}, crossing {plan.crosses_for:.2f} "
-                    f"from a mid of {plan.quote.mid:.2f}."
+                    f"Submitting one atomic {len(plan.legs)}-leg close at {limit:.2f} "
+                    f"for {plan.contracts} structure lot(s)."
                 ),
-                contracts=leg.contracts,
-                net_price=round(plan.limit_price, 2),
-                extra={"client_order_id": client_order_id},
+                contracts=plan.contracts,
+                net_price=limit,
+                extra={"client_order_id": client_order_id, "entry_cycle_id": plan.entry_cycle_id},
             )
         )
         try:
-            order = self.gateway.close_leg(
-                leg.symbol, leg.contracts, plan.limit_price, client_order_id
-            )
+            order = self.gateway.close_structure(positions, limit, client_order_id)
             resolution = resolve_order(
                 self.gateway,
                 order,
-                abs(leg.contracts),
+                plan.contracts,
                 timeout_seconds=self.config.float_("execution.order_status_timeout_seconds"),
                 poll_seconds=self.config.float_("execution.order_poll_seconds"),
             )
@@ -354,68 +442,56 @@ class PositionManager:
                 Record(
                     action=Action.ORDER_REJECTED,
                     cycle_id=report.cycle_id,
-                    structure=leg.symbol,
-                    rationale=f"Could not close {leg.symbol}: {error}",
-                    contracts=leg.contracts,
-                    reject_reason="close_rejected",
-                    extra={"client_order_id": client_order_id},
+                    structure=plan.structure,
+                    rationale=f"Could not atomically close {plan.structure}: {error}",
+                    contracts=plan.contracts,
+                    reject_reason="atomic_close_rejected",
+                    extra={"client_order_id": client_order_id, "entry_cycle_id": plan.entry_cycle_id},
                 )
             )
-            report.failed.append({"symbol": leg.symbol, "error": str(error)})
+            report.failed.append({"symbol": plan.structure, "error": str(error)})
             return
 
         outcome = outcome_fields(resolution.order, cancel_requested=resolution.cancel_requested)
-        outcome.update(
-            {
-                "trigger": str(report.triggers[0]),
-                "unrealised_pnl_at_close": round(leg.unrealised_pnl, 2),
-                "average_entry_price": leg.average_entry_price,
-            }
-        )
+        outcome.update({"trigger": str(report.triggers[0])})
         if not resolution.filled:
             pending = not resolution.terminal
             self.ledger.append(
                 Record(
                     action=Action.POSITION_CLOSE_PENDING if pending else Action.ORDER_REJECTED,
                     cycle_id=report.cycle_id,
-                    structure=leg.symbol,
+                    structure=plan.structure,
                     rationale=(
-                        f"Close {resolution.order.id} is {resolution.order.status} with "
-                        f"{resolution.order.filled_qty}/{abs(leg.contracts)} contracts filled; "
-                        "the position remains under guard."
+                        f"Atomic close {resolution.order.id} is {resolution.order.status} with "
+                        f"{resolution.order.filled_qty}/{plan.contracts} structures filled; "
+                        "no leg-by-leg fallback is permitted."
                     ),
-                    contracts=leg.contracts,
-                    net_price=round(plan.limit_price, 2),
-                    reject_reason="close_pending" if pending else "close_not_filled",
+                    contracts=plan.contracts,
+                    net_price=limit,
+                    reject_reason="atomic_close_pending" if pending else "atomic_close_not_filled",
                     outcome=outcome,
-                    extra={"client_order_id": client_order_id},
+                    extra={"client_order_id": client_order_id, "entry_cycle_id": plan.entry_cycle_id},
                 )
             )
-            report.failed.append(
-                {
-                    "symbol": leg.symbol,
-                    "error": "closing order was not fully filled",
-                    "order_id": resolution.order.id,
-                }
-            )
+            report.failed.append({"symbol": plan.structure, "error": "atomic close was not fully filled"})
             return
 
         self.ledger.append(
             Record(
                 action=Action.POSITION_CLOSED,
                 cycle_id=report.cycle_id,
-                structure=leg.symbol,
+                structure=plan.structure,
                 rationale=(
-                    f"Alpaca verified close {resolution.order.id} fully filled at "
-                    f"{resolution.order.filled_avg_price} for {leg.contracts:+d} {leg.symbol}."
+                    f"Alpaca verified atomic close {resolution.order.id} fully filled for "
+                    f"{plan.contracts} structure lot(s)."
                 ),
-                contracts=leg.contracts,
-                net_price=round(plan.limit_price, 2),
+                contracts=plan.contracts,
+                net_price=limit,
                 outcome=outcome,
-                extra={"client_order_id": client_order_id},
+                extra={"client_order_id": client_order_id, "entry_cycle_id": plan.entry_cycle_id},
             )
         )
-        report.closed.append({"symbol": leg.symbol, "order_id": str(resolution.order.id)})
+        report.closed.append({"structure": plan.structure, "order_id": str(resolution.order.id)})
 
     # --------------------------------------------------------------- settlement
 
@@ -435,13 +511,26 @@ class PositionManager:
 
         for record in self.ledger.read():
             action = record.get("action")
-            if action == Action.ORDER_SUBMITTED.value and record.get("legs"):
-                if str(record.get("ts", ""))[:10] == str(session_date):
+            outcome = record.get("outcome") or {}
+            if action == Action.ORDER_FILLED.value and record.get("legs"):
+                try:
+                    filled = int(float(outcome.get("filled_qty", 0)))
+                    contracts = int(record["contracts"])
+                except (KeyError, TypeError, ValueError):
+                    continue
+                if (
+                    str(record.get("ts", ""))[:10] == str(session_date)
+                    and str(outcome.get("status", "")).lower() == "filled"
+                    and filled == contracts > 0
+                ):
                     opened[f"{record['cycle_id']}/{record.get('structure')}"] = record
             elif action == Action.POSITION_CLOSED.value:
-                outcome = record.get("outcome") or {}
                 if "realised_pnl" in outcome:
                     settled_already.add(f"{record['cycle_id']}/{record.get('structure')}")
+                elif record.get("entry_cycle_id"):
+                    settled_already.add(
+                        f"{record['entry_cycle_id']}/{record.get('structure')}"
+                    )
                 elif record.get("structure"):
                     closed_symbols.add(str(record["structure"]))
 

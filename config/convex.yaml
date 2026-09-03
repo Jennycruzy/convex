@@ -110,7 +110,16 @@ execution:
   order_poll_seconds: 1
 
 liquidity:
-  max_relative_spread: 0.0513       # MEASURED 2026-09-02 by scripts/calibrate_costs.py
+  # The classified replay remains positive through a 1.0% relative spread per
+  # leg and turns negative at 1.5%. This is intentionally stricter than the
+  # 5.13% observed ceiling: an executable quote is not necessarily a profitable
+  # one. Wide books produce a documented refusal, never a desperation fill.
+  # `max_relative_spread` is refreshed from the live book at 09:55. It is an
+  # observation, not permission to loosen the P&L rule below.
+  max_relative_spread: 0.0100       # MEASURED/observed; refreshed by calibration
+  # Hard policy ceiling validated by the spread-sensitivity replay. Calibration
+  # must never turn this into the wider raw-book percentile.
+  admission_spread_cap: 0.0100      # VALIDATED P&L admission cap
   min_displayed_size: 1             # contracts on the touch
   max_quote_age_seconds: 30         # feature-staleness budget
 
@@ -148,53 +157,33 @@ classifier:
 
 risk:
   risk_pct_per_structure: 0.01      # 1% of equity
-  max_concurrent_structures: 4
+  # The replacement profile is deliberately observed one lot at a time. This
+  # cap is independent of the loss and ES budgets: both still have to pass.
+  max_contracts_per_structure: 1
+  min_net_edge_dollars: 25.0        # no trade on a nominal edge after all costs
+  # A positive point estimate is insufficient. The one-sided lower bound uses
+  # the candidate's historical scenario distribution and must remain positive.
+  net_edge_confidence_level: 0.95
+  min_net_edge_lower_bound_dollars: 0.01
+  max_concurrent_structures: 1      # one attributable atomic exit at a time
   portfolio_es_cap_pct: 0.03        # projected portfolio ES(1%) ceiling
   daily_loss_limit_pct: 0.03
   cumulative_fee_budget_pct: 0.02
   es_confidence: 0.01               # the 1% in ES(1%)
 
-structures:
-  # Relative weighting is not a size multiplier (Law 11 forbids that). It is the
-  # order in which equally ranked candidates break ties, reflecting the paper's
-  # finding that call ratio structures are weaker than put ratio structures.
-  enabled: [put_bwb, call_bwb, straddle, strangle, debit_vertical]
-  tie_break_order: [put_bwb, debit_vertical, straddle, strangle, call_bwb]
+strategy:
+  # The installed 10:00 ET timer dispatches to this isolated profile. The
+  # legacy structures list remains empty, so it cannot open a generic vertical.
+  active_profile: gap_continuation_vertical
 
-# Profiles for comparing the same engine under different candidate universes.
-# They are deliberately separate from the main strategy configuration above:
-# scripts/tournament.py reads them through an in-memory override, so a
-# comparison run never rewrites this file, and each profile keeps its own
-# ledger for a side-by-side dashboard view.
-#
-# The runner is dry-run by default and not dry-run only. Passing --submit with
-# a named profile sends one bounded, defined-risk order to the paper account,
-# and on 2 September that route filled 6 lots of a call broken-wing butterfly
-# at 12:01 ET. An earlier version of this comment claimed invoking the runner
-# could not submit an order, which was not true of the code beneath it.
-tournament:
-  profiles:
-    skew_bwb:
-      label: Skew BWB
-      description: Directional broken-wing butterflies selected by the existing skew/variance rule.
-      families: [put_bwb, call_bwb]
-      fill_ladder_ticks: []
-      ledger: data/tournament/skew_bwb/decisions.jsonl
-    execution_bwb:
-      label: Execution BWB
-      description: The same BWB universe with a recorded, bounded fill-ladder observation plan.
-      families: [put_bwb, call_bwb]
-      fill_ladder_ticks: [0, 1, 2]
-      ledger: data/tournament/execution_bwb/decisions.jsonl
-    trend_vertical:
-      label: Trend vertical
-      description: Defined-risk debit verticals only after an opening-range break agrees with VWAP.
-      families: [debit_vertical]
-      fill_ladder_ticks: []
-      ledger: data/tournament/trend_vertical/decisions.jsonl
-  trend:
-    opening_range_minutes: 15
-    min_vwap_distance_pct: 0.0005
+structures:
+  # Disabled after the 2026-09-02 chronological audit. At a 1.0% per-leg
+  # spread, put BWB made +440.14 in the first 124 sessions but -349.55 over the
+  # untouched final 54; call BWB was negative in both. Neither beats cash after
+  # costs, so no family is permitted to create new risk until a replacement
+  # passes the same walk-forward test.
+  enabled: []
+  tie_break_order: []
 
 paths:
   ledger: data/ledger/decisions.jsonl

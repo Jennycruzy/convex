@@ -1,63 +1,41 @@
-# CONVEX · one-page write-up
+# CONVEX — Cost-Gated Autonomous Options Agent
 
-**Alpaca account ID:** `PA35QSFNW15J` (paper, opened 2026-08-29 00:20 ET at exactly $100,000.00, options level 3). Brand new and dedicated to this hackathon, opened after the 28 August kick off and never used for anything else.
-**Repo:** github.com/Jennycruzy/convex · **Demo:** https://convex.isobars.xyz
-**Instrument:** SPY 0DTE options, paper account, entry 10:00 ET, held to the 16:00 close.
+**Alpaca paper account:** `PA35QSFNW15J` · **Demo:** https://convex.isobars.xyz · **Repository:** https://github.com/Jennycruzy/convex
 
----
+CONVEX is an autonomous SPY 0DTE options agent built for this hackathon’s dedicated $100,000 Alpaca paper account. It uses Alpaca’s MCP server as its only market-data and execution route, trades defined-risk multi-leg options structures, and publishes every decision—including refusals—as an append-only receipt.
 
-## The claim
+## The problem
 
-Most 0DTE bots sell iron condors or buy butterflies. **"0DTE Trading Rules: Tail Risk, Implementation, and Tactical Timing"** (SPXW, 09/2016–01/2026; replication package at `github.com/vilkovgr/0dte-strategies`) tested both across ten years net of realistic frictions and found the iron butterfly/condor family at **gross Sharpe 0.77, net −0.20**. A long butterfly and an iron butterfly are synthetically equivalent, so that is the structure most of this field ships. It does not fail because the payoff shape is wrong. It fails because four legs of bid/ask consume the edge.
+A trade that looks profitable at mid-price can be negative after the spread, slippage, fees, and the cost of exit. Most options agents show the first number. CONVEX makes the second number the only one that can authorize an order.
 
-CONVEX is built on the parts of that paper that survived costs: **put ratio spreads (gross 1.18 / net 0.93)**, **strangles and straddles (0.56 / 0.39)**, and the finding that a **basket across families beats any single structure (1.12 / 0.82)**.
+The put and call broken-wing butterfly families are **disabled**. A chronological audit on 2 September found both negative on the untouched final 54-session segment after costs, so they cannot create new risk. For the final paper sessions, the installed runner contains one separate, bounded observation profile: after a qualifying opening gap remains on the same side of VWAP at 10:00 ET, it may enable one direction-matched debit vertical in memory. That profile is still subject to the full net-cost, lower-bound, liquidity, loss, and execution gates, and it may stand down. The project refuses to convert an in-sample idea into a paper trade merely to manufacture activity.
 
-## The AI logic
+## Autonomous decision logic
 
-**Directional classification, not return prediction.** The paper is explicit that conditional timing works better as binary classification than as magnitude forecasting, and that within binary designs hard mapping dominates soft mapping. So for each structure family *s* on day *t*:
+At 10:00 ET, the agent obtains the SPY option chain, account, clock, calendar, positions, and quotes from Alpaca MCP. It builds implied-variance, skew, slope, lagged-return, liquidity, and cost features observable at that time. The normal path uses a regularized logistic classifier; the final-day gap profile supplies its documented held-out lead and restricts the candidate direction, but it does not bypass any gate.
 
-```
-y[s,t] = 1 if net PnL > 0 else 0
-p[s,t] = LogisticRegression(L2).predict_proba(X[s,t])
-w[s,t] = sign(p[s,t] − 0.5)        # full size or nothing
-```
+The agent then enumerates real contracts and simulates their expiry payoff across its scenario set. It trades only if all of these pass:
 
-**L2 logistic regression, deliberately, and not a limitation.** The paper found a low-variance parametric model beats higher-capacity ones on short-horizon 0DTE data with noisy payoffs and small per-strategy samples. There is no neural network here on purpose, and the model is auditable as a result: every coefficient is inspectable and every probability is reproducible from the recorded feature row.
+- at least **$25** expected net edge after measured spread, slippage, fees, and exit reserve;
+- a **positive one-sided 95% lower confidence bound** for the scenario mean net P&L;
+- every leg is at or below the lower of the observed threshold and the validated **1.0% relative-spread admission cap**. The replay is positive through 1.0% and negative at 1.5%, so wider quotes are executable but not admissible;
+- maximum loss is computed before order submission; one-percent expected shortfall, daily loss, buying power, freshness, and assignment gates all pass;
+- at most **one** attributable multi-leg position is open.
 
-**Features, all observable by 10:00 ET, no look-ahead.** Integrated implied variance from the 0DTE chain (VIX methodology, 10:00 to 16:00); **implied skew `IS = IV_up − IV_dn`**, the highest-value feature, because realized skewness drives 0DTE PnL more than realized variance does; slope proxies; lagged realized moments; each family's own lagged results; and liquidity terms (half-spread, depth, relative spread, tightness) which feed cost directly. Alpaca currently omits Greeks and open interest on expiring SPY contracts, so the GEX-style exposure proxy is displayed only when supplied and is not a classifier input. Predictors are standardised inside the training window only, on an expanding window.
+The lower-confidence-bound and spread gates are specifically designed to reject an attractive-looking expected value that is too uncertain or too expensive to execute. Standing down is a successful autonomous outcome, not a missing decision.
 
-**Honest caveat, stated because it is true:** SPY 0DTE history available through Alpaca is short relative to the burn-in a walk-forward protocol wants. Where it is insufficient the agent says so and runs a documented volatility-regime rule instead: downside structures in high-implied-variance states, upside in low. The ledger records which of the two made every single call. Hit rate, Brier score and calibration slope are reported, not accuracy alone.
+## P&L evidence and execution integrity
 
-**The LLM computes nothing.** Featherless narrates a brief of figures already computed by deterministic code. A numerical-token guard rejects any narration that introduces, changes, or re-rounds a number; the deterministic rationale is written instead and the record says which one it was.
+A chronological 178-session audit over a 124-session selection period and untouched 54-session test period invalidated both BWB families after costs: put BWB was −$349.55 on the held-out segment and call BWB was −$330.95. They are disabled. A separate gap-continuation reconstruction produced +$757.37 over 12 held-out verticals, but its historical confidence bound is still negative, so it is treated as a one-lot observation lead—not proven alpha. The live candidate must independently clear the positive lower-bound gate at the current quote. The public dashboard displays the sensitivity sweep and the verified account receipts rather than presenting an in-sample replay as a contest-P&L forecast.
 
-## The structures
+P&L is never inferred from a submitted order. CONVEX credits or debits the dashboard only after Alpaca reports a complete fill. A canceled zero-fill order cannot become a position, settle at expiry, influence model history, or change the dashboard; an append-only correction receipt documents the earlier accounting error rather than hiding it.
 
-**S1 put broken-wing butterfly (primary).** The paper's best structure is the put ratio spread, but a raw ratio spread has an open downside. A 1×2 put ratio plus a protective lower wing *is* a put broken-wing butterfly: the same skew exposure with the risk defined, usually entered for a credit, so above every strike it keeps the credit and risks nothing. **S2** call BWB (weaker per the paper, so the classifier decides). **S3** long straddle/strangle. **S4** debit vertical, two legs instead of four, which matters enormously under cost. **S5 stand down**, a first-class logged outcome.
+Entries and assignment-driven exits are atomic Alpaca multi-leg limit orders: either the full defined-risk structure fills or the agent records a non-fill. It never uses a market order or disassembles a structure leg-by-leg. A close can always occur for risk management; no ordinary strategy action needs human per-order approval.
 
-**Not built: symmetric butterflies and iron condors.** Negative net Sharpe. Declining to build them is the thesis.
+## Alpaca implementation and presentation
 
-## The risk gates
+Alpaca MCP is the complete brokerage interface: account, calendar, contracts, quotes, orders, positions, and paper execution all go through its structured tools. The dashboard is server-rendered with no external data dependency and reads directly from the append-only JSONL evidence. Judges can see the selected structure, net-of-cost waterfall, payoff, every gate verdict, order outcome, realized P&L, and every refusal at the demo URL.
 
-Fifteen, every one logged with its verdict whether it passes or fails.
+The creative contribution is not another opaque “multi-agent hedge fund.” It is an **execution-truth agent**: model ideas are allowed to compete, but deterministic evidence can veto them; the ledger preserves the veto; and P&L remains tied to verified broker facts. The LLM may explain a decision, but cannot calculate a price, probability, size, or order.
 
-*Session scope:* **1** kill switch (append-only file, every cycle) · **2** **calibration: no position is opened while any cost or liquidity input is still an unmeasured guess.** The live spread threshold is measured at 09:55 ET and a fresh successful receipt is required for the exact 10:00 ET entry. Fee assumptions are conservative bounds until Alpaca's day-level activity provides actual fee receipts · **3** market calendar, from Alpaca's own endpoint rather than a local holiday table · **4** daily loss limit, 3% of equity then halt and publish · **5** buying power, verified against the account · **6** cumulative cost budget, 2% of equity.
-
-*Candidate scope:* **7** max loss computable and within budget: the agent is structurally incapable of submitting a position whose worst case it cannot compute, because pricing runs *through* the max-loss calculator · **8** **net-of-cost hurdle: edge must exceed half-spread × legs + slippage. The most important gate in the system** · **9** leg-count preference, two legs over four at comparable net edge · **10** liquidity, rejecting any leg whose relative spread exceeds the measured threshold · **11** portfolio ES(1%) cap at 3% of equity · **12** **assignment: no leg that can settle into shares survives the final thirty minutes** · **13** classifier confidence, standing down when probabilities cluster at 0.5 · **14** feature staleness · **15** concurrency, at most four open structures.
-
-**Sizing is computed, never chosen.** `risk_budget = equity × 1%`; `contracts = floor(risk_budget / max_loss)`; then the portfolio ES check. One function, no override parameter. Confidence decides *whether* to trade and never *how much*, because ES(1%) at 0DTE runs roughly 0.58–1.58% of underlying, which makes mean PnL an inadequate summary statistic on its own.
-
-**Positions are held to expiry.** No stop losses on defined-risk structures: stopping out converts a capped loss into a realised loss plus multi-leg slippage. Exactly three things close early: kill switch, daily loss limit, assignment guard.
-
-## The Alpaca infrastructure
-
-**MCP is the entire data and execution layer.** The agent's only route to the market is the server Alpaca publishes (`alpaca-mcp-server`), spawned as a child process over stdio, with the toolset restricted to account, trading, assets, stock-data and options-data. Chains, Greeks, implied volatility, open interest, quotes, the market calendar, positions, orders: all of it arrives over MCP. Structures go out as **atomic multi-leg limit orders**, so every leg fills together or none does, which removes partial-fill risk from a four-legged position. Never a market order: a market order on a spread is a donation to the other side.
-
-Two failure modes get explicit handling because they would otherwise be silent. The order tools answer with a *successful* JSON-RPC result whose body can carry an error object, so every payload is inspected before it can be read as a fill. And every call carries a timeout, because a cycle that hangs at 10:00 is a cycle that misses its entry. Response parsing is written against the OpenAPI specs shipped inside the server package; a field the agent depends on raises when absent rather than becoming a zero.
-
-**SPX research, SPY execution.** Alpaca lists equity and ETF options, not index options, so every parameter was re-derived: $1 strikes instead of $5, **physical American settlement instead of cash European**, ~$650 underlying instead of ~6,800, and the paper's ±2% moneyness band mapping to roughly ±$13. Widths are expressed as fractions of spot, never as absolute points. Physical settlement is why the assignment guard exists at all. It has no counterpart in the paper being implemented, and it closes shorts before longs so no ordering ever leaves an undefined-risk position standing.
-
-**Every decision leaves a receipt.** An append-only JSONL ledger records timestamp, per-structure probability and its source, the feature row, strikes, net debit or credit, the full cost breakdown, max loss, ES contribution, size and its binding constraint, every gate verdict, the written rationale, and the outcome, **including every refusal and every stand-down**. The public dashboard is a view over that ledger and computes nothing of its own, so the page a judge loads and the evidence in this write-up are the same artefact.
-
-## What this is not
-
-Alpaca's calendar puts six sessions in this window (Aug 28, 31, Sep 1, 2, 3, 4; Labor Day is Sep 7, not Sep 1), and CONVEX will trade fewer than that. A handful of sessions is not a track record; P&L across this window is substantially variance. Alpaca currently omits Greeks and open interest on expiring SPY contracts, so GEX-style exposure is an optional displayed proxy rather than a classifier input or a dealer-inventory reconstruction. The live spread threshold is recalibrated from real SPY quotes immediately before entry and broker fees are reconciled from Alpaca activity after fills. The reproducible contribution here is the cost discipline, the risk gates, and the receipts, not the P&L.
+**Paper-trading disclosure:** This project operates only in Alpaca’s paper environment. Results are hypothetical, may differ from live execution, and are not investment advice.

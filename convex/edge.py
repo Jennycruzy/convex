@@ -18,6 +18,8 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
+from math import sqrt
+from statistics import NormalDist
 
 import numpy as np
 
@@ -44,6 +46,24 @@ class EdgeEstimate:
     @property
     def net_edge(self) -> float:
         return self.gross_edge - self.cost.total
+
+    def net_edge_lower_bound(self, confidence: float) -> float:
+        """One-sided lower confidence bound for the scenario mean net P&L.
+
+        The point estimate alone is not enough to spend capital on. This uses
+        the empirical standard error of the same net scenario outcomes used by
+        the tail calculation, and a one-sided normal critical value. It is a
+        deliberately conservative admission test, not a claim that historical
+        scenarios are independent or a guarantee of future P&L.
+        """
+        if not 0.5 < confidence < 1.0:
+            raise DataError(
+                f"net-edge confidence must lie strictly between 0.5 and 1, found {confidence}"
+            )
+        if self.net_outcomes.size < 2:
+            raise DataError("at least two net outcomes are required for a confidence bound")
+        standard_error = float(self.net_outcomes.std(ddof=1)) / sqrt(self.net_outcomes.size)
+        return self.net_edge - NormalDist().inv_cdf(confidence) * standard_error
 
     @property
     def cost_share_of_gross(self) -> float:

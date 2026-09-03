@@ -118,6 +118,22 @@ def test_realised_results_accumulate_only_from_settled_positions(client):
     assert summary["settled_structures"] == 1
 
 
+def test_a_correction_removes_an_invalidated_loss_from_the_dashboard(client):
+    session, path = client
+    write(
+        path,
+        Record(action=Action.POSITION_CLOSED, cycle_id="c1", structure="call_bwb",
+               rationale="incorrect settlement", outcome={"realised_pnl": -840.0}),
+        Record(action=Action.CORRECTION, cycle_id="audit-c1", structure="call_bwb",
+               rationale="The canceled entry never filled; this settlement is invalid.",
+               extra={"invalidates": [1]}),
+    )
+    summary = session.get("/api/summary").json()
+    assert summary["realised_pnl"] == 0.0
+    assert summary["settled_structures"] == 0
+    assert read.realised_curve(read.load(path)) == ([], [])
+
+
 def test_the_refusal_rate_is_refusals_over_everything_considered():
     summary = read.Summary(orders=1, refusals=3)
     assert summary.refusal_rate == 0.75
@@ -190,7 +206,7 @@ def test_a_payoff_diagram_needs_more_than_one_point():
 
 def opened_bwb():
     return Record(
-        action=Action.ORDER_SUBMITTED,
+        action=Action.ORDER_FILLED,
         cycle_id="c9",
         structure="put_bwb",
         rationale="Entering 2 lots.",
@@ -205,6 +221,7 @@ def opened_bwb():
             {"symbol": "SPY260831P00645000", "right": "put", "strike": 645.0, "ratio": -2},
             {"symbol": "SPY260831P00635000", "right": "put", "strike": 635.0, "ratio": 1},
         ],
+        outcome={"status": "filled", "filled_qty": "2", "order_id": "filled-bwb"},
         extra={"waterfall": {"gross_edge": 40.0, "half_spread": -6.0, "slippage": -4.0,
                              "fees": -1.0, "exit_reserve": -3.0, "net_edge": 26.0}},
     )

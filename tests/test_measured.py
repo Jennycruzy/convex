@@ -177,6 +177,7 @@ def test_an_open_market_with_a_real_sample_writes_and_leaves_a_receipt(tmp_path,
     assert code == 0
     assert KEY not in load(path).hypotheses()
     assert load(path).float_(KEY) == pytest.approx(0.0731)
+    assert load(path).float_("liquidity.admission_spread_cap") == pytest.approx(0.01)
 
     # The receipt carries what the threshold was as well as what it became.
     assert len(ledger.records) == 1

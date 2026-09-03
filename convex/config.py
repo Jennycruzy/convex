@@ -80,14 +80,7 @@ class Config:
         return (self.path.parent.parent / self.str_(dotted)).resolve()
 
     def with_overrides(self, overrides: dict[str, Any]) -> "Config":
-        """Return an in-memory configuration with explicit dotted-key overrides.
-
-        Tournament profiles must not rewrite the operator's main YAML file: a
-        dry-run comparison is evidence, not a reason to alter the production
-        strategy. This keeps the same repository-relative path resolution and
-        validation behaviour while making profile-specific ledgers and family
-        sets possible.
-        """
+        """Return an in-memory configuration with explicit dotted-key overrides."""
         values = deepcopy(self.values)
         for dotted, value in overrides.items():
             parts = dotted.split(".")

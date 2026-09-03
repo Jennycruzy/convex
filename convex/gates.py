@@ -325,16 +325,46 @@ class NetOfCostGate:
     def check(self, context, candidate, estimate, size) -> GateResult:
         _require(candidate, estimate)
         net = estimate.net_edge
-        passed = net > 0.0
-        if estimate.gross_edge > 0.0 and not passed:
+        minimum = context.config.float_("risk.min_net_edge_dollars")
+        if minimum <= 0.0:
+            raise ConfigError("risk.min_net_edge_dollars must be positive")
+        passed = net >= minimum
+        if estimate.gross_edge > 0.0 and net <= 0.0:
             detail = (
                 f"gross edge {estimate.gross_edge:,.2f} is entirely consumed by "
                 f"{estimate.cost.total:,.2f} of execution cost across "
                 f"{estimate.cost.leg_count} legs, leaving {net:,.2f}"
             )
         else:
-            detail = f"net edge {net:,.2f} after {estimate.cost.total:,.2f} of cost"
-        return GateResult(self.name, self.scope, passed, detail, observed=net, threshold=0.0)
+            detail = (
+                f"net edge {net:,.2f} after {estimate.cost.total:,.2f} of cost "
+                f"against a required minimum of {minimum:,.2f}"
+            )
+        return GateResult(self.name, self.scope, passed, detail, observed=net, threshold=minimum)
+
+
+class PositiveNetEdgeBoundGate:
+    """Require the lower confidence bound of expected net P&L to be positive."""
+
+    name = "net_edge_lower_bound"
+    scope = "candidate"
+
+    def check(self, context, candidate, estimate, size) -> GateResult:
+        _require(candidate, estimate)
+        confidence = context.config.float_("risk.net_edge_confidence_level")
+        minimum = context.config.float_("risk.min_net_edge_lower_bound_dollars")
+        if minimum < 0.0:
+            raise ConfigError("risk.min_net_edge_lower_bound_dollars cannot be negative")
+        lower_bound = estimate.net_edge_lower_bound(confidence)
+        return GateResult(
+            self.name,
+            self.scope,
+            lower_bound > minimum,
+            f"{confidence:.0%} lower bound of scenario mean net P&L is {lower_bound:,.2f} "
+            f"against a required positive {minimum:,.2f}",
+            observed=lower_bound,
+            threshold=minimum,
+        )
 
 
 class LegCountPreference:
@@ -360,7 +390,14 @@ class LiquidityGate:
 
     def check(self, context, candidate, estimate, size) -> GateResult:
         _require(candidate, estimate)
-        max_relative = context.config.float_("liquidity.max_relative_spread")
+        observed_max = context.config.float_("liquidity.max_relative_spread")
+        policy_cap = context.config.float_("liquidity.admission_spread_cap")
+        if observed_max <= 0.0 or policy_cap <= 0.0:
+            raise ConfigError("liquidity spread limits must be positive")
+        # Calibration measures the book; it does not get to loosen the
+        # profitability rule. A wider live percentile can only leave the
+        # validated admission cap in force, never replace it.
+        max_relative = min(observed_max, policy_cap)
         min_size = context.config.int_("liquidity.min_displayed_size")
         worst_symbol = ""
         worst_relative = 0.0
@@ -384,7 +421,8 @@ class LiquidityGate:
             self.scope,
             worst_relative <= max_relative,
             f"widest leg is {worst_symbol} at {worst_relative:.1%} of mid "
-            f"against a {max_relative:.1%} limit",
+            f"against a {max_relative:.1%} admission limit "
+            f"(observed book limit {observed_max:.1%}, hard cap {policy_cap:.1%})",
             observed=worst_relative,
             threshold=max_relative,
         )
@@ -516,6 +554,7 @@ SESSION_GATES: tuple[Gate, ...] = (
 CANDIDATE_GATES: tuple[Gate, ...] = (
     MaxLossGate(),
     NetOfCostGate(),
+    PositiveNetEdgeBoundGate(),
     LegCountPreference(),
     LiquidityGate(),
     ExpectedShortfallGate(),

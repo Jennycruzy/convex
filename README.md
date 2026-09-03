@@ -25,7 +25,7 @@ CONVEX does four things differently:
 
 1. **Trades skew, not variance.** Realized skewness drives 0DTE PnL more than realized variance does. The variance risk premium at 0DTE has a median of ~0.0011% of underlying from 10:00 to expiry: real, and smaller than the cost of harvesting it.
 2. **Classifies direction, not magnitude.** Per-structure binary target, L2 logistic, hard mapping, full size or nothing. The paper is explicit that a low-variance parametric model beats higher-capacity ones on short-horizon 0DTE data, so there is no neural net here and that is a deliberate finding, not a shortcut.
-3. **Diversifies across structure families.** The basket beat every single structure tested. Nothing concentrates into the highest-probability candidate.
+3. **Requires chronological evidence.** No family may create new risk until it beats cash on an untouched post-selection segment after costs. The 2 September audit failed both BWB families, so they remain disabled. The only installed entry profile is a one-lot gap-continuation debit vertical: it enables a direction-matched candidate in memory only after a qualifying opening gap and VWAP check, and it still has to clear every execution and risk gate. It can—and often should—stand down.
 4. **Prices cost and tail risk before entry, not after.** Every candidate is ranked on edge *net* of measured half-spread per leg plus slippage. A structure that is attractive gross and unattractive net is rejected, and the rejection is written to the ledger with its arithmetic.
 
 That last one is the whole project. The gross-to-net gap is where the field dies, and CONVEX makes it visible on every single decision.
@@ -34,7 +34,7 @@ That last one is the whole project. The gross-to-net gap is where the field dies
 
 ## What it will not do
 
-- **No symmetric butterflies or iron condors.** Negative net Sharpe. Rejecting them *is* the thesis.
+- **No BWB or iron-condor comeback.** The BWB families failed the untouched audit and stay disabled. The gap-continuation profile is an explicitly bounded paper observation, not a claim that the old strategy was repaired.
 - **No naked shorts, ever.** Every position has a maximum loss computed before the order is built. This is why the primary structure is a put *broken-wing butterfly* rather than a raw put ratio spread: a 1×2 put ratio plus a protective lower wing is the same skew exposure with the risk defined.
 - **No stop losses on defined-risk structures.** Stopping out of a capped-loss position converts a bounded loss into a realised loss plus multi-leg slippage. Positions are held to expiry. Exactly three things close one early: the kill switch, the daily loss limit, and the assignment guard.
 - **No LLM computing anything.** The language model narrates a brief of figures that were already computed. It cannot produce a price, a Greek, a probability, a size or a risk number, and the agent trades normally when it is switched off.
@@ -111,12 +111,12 @@ Every one must pass, and every verdict, pass or fail, is written to the ledger.
 7. **Max loss computable and within budget**: the agent is structurally incapable of submitting a position whose worst case it cannot compute
 8. **Net-of-cost hurdle**: edge must exceed half-spread × legs + slippage. *The most important check in the system.*
 9. **Leg-count preference**: two legs beat four at comparable net edge, because each leg is another half-spread
-10. **Liquidity**: reject any leg whose relative spread exceeds the measured threshold
+10. **Liquidity**: reject any leg whose relative spread exceeds the lower of the observed book threshold and the validated 1% admission cap
 11. **Expected shortfall cap**: projected portfolio ES(1%) within 3% of equity
 12. **Assignment**: no leg that can settle into shares survives the final thirty minutes
 13. **Classifier confidence**: stand down when probabilities cluster at 0.5
 14. **Feature staleness**: never trade off a stale chain
-15. **Concurrency**: at most four open structures
+15. **Concurrency**: at most one attributable structure, so an assignment guard can close it atomically
 
 Standing down is a first-class outcome, logged and published with its reasoning. An agent that knows when not to trade is a stronger result than one that always fires.
 
@@ -151,95 +151,3 @@ cp .env.example .env          # then fill in the paper account's keys
 .venv/bin/python -m scripts.backtest --json  # replay them; --json feeds the dashboard
 .venv/bin/python -m scripts.serve            # the dashboard, on :8000
 ```
-
-### Tournament observation profiles
-
-```bash
-.venv/bin/python -m scripts.tournament
-.venv/bin/python -m scripts.tournament --profile trend_vertical
-```
-
-The default is **dry-run only**: it reads the current paper-market data, then
-writes a separate ledger for each profile under `data/tournament/`. Its gateway
-rejects every order write. The profile comparison appears on the dashboard and
-is kept separate from account P&L.
-
-The only submission path is explicit and narrow:
-
-```bash
-.venv/bin/python -m scripts.tournament --submit --profile skew_bwb
-.venv/bin/python -m scripts.tournament --submit --profile execution_bwb
-```
-
-It can submit one atomic, defined-risk BWB to the configured Alpaca **paper**
-account. It uses the canonical account ledger so the normal manager and broker
-reconciliation own the position, preserves every cost/risk gate, and sets the
-concurrency cap to one. Trend Vertical stays observation-only. Execution BWB
-may retry a canceled, zero-fill initial order at one and then two ticks worse,
-but only after taking fresh quotes, account/spot/clock readings, session gates,
-and all candidate gates. A paper trade can still lose.
-
-- **Skew BWB** prices only put/call broken-wing butterflies using the existing
-  variance/skew decision rule.
-- **Execution BWB** uses the same BWB universe. In dry-run it records a
-  two-tick observation plan; with its explicit submission command it can retry
-  only a canceled, zero-fill order and recalculates net edge and all gates at
-  each rung.
-- **Trend vertical** prices a bull-call or bear-put debit vertical only after a
-  15-minute opening-range break and VWAP agree. If they disagree, it records a
-  stand-down rather than guessing.
-
-Deployment artifacts are in `deploy/`: a systemd unit that keeps the dashboard up
-across reboots, bound to loopback and published by nginx which terminates TLS. The
-unit runs with `ProtectSystem=strict` and no access to the agent's credentials: the
-dashboard only ever reads the ledger.
-
-The dashboard is server-rendered with no build step and no external requests. The
-charts are inline SVG, because a deployed demo that renders a blank panel when a CDN
-is slow scores as a demo that does not work. Before the agent has run it shows an
-empty page saying so; there is no sample trade and no demo mode.
-
-`--dry-run` is not a simulation. Every read goes to the real API; only the write is withheld, so it exercises the same chain, the same account and the same checks as a live cycle.
-
-Tests:
-
-```bash
-.venv/bin/python -m pytest
-```
-
-The suite starts the real Alpaca MCP server as a subprocess and asserts against the
-tool surface it actually exposes. Nothing in this repository mocks a chain, stubs a
-quote, or returns a canned price.
-
-The integration suite talks to the live paper account and is run separately:
-
-```bash
-.venv/bin/python -m pytest tests/integration -s
-```
-
-It skips cleanly without credentials. With them it measures the real per-leg spread,
-checks the strike increment and multiplier against the chain rather than the
-configuration, reads Alpaca's own calendar for the competition window, runs a full
-decision cycle with only the write withheld, and asserts that a candidate really is
-refused because its execution cost consumed its edge. A check that has never been
-observed firing has not been demonstrated. Use `-s` to see the measured figures.
-
----
-
-## Honest limitations
-
-- **The research is SPX; this trades SPY.** Every parameter carried across is a hypothesis. Values in `config/convex.yaml` are marked `MEASURED` or `HYPOTHESIS`, and the hypotheses are not to be relied on in a live decision until `scripts/calibrate_costs.py` has replaced them.
-- **The exposure feature is optional and a proxy.** Alpaca currently omits Greeks and open interest on expiring SPY contracts, so it is not a classifier input. When the feed supplies it, it is displayed as a flow/exposure estimate, not a dealer-inventory reconstruction.
-- **The classifier may not have enough history.** Training runs on chains the agent *recorded*, never on simulated ones, because an expired contract's book cannot be fetched back, and a session that was not recorded can never be labelled honestly. Early on there will be too few sessions to clear the burn-in; `scripts/train.py` says so and fits nothing rather than presenting a model fitted on thirty rows. The agent then runs a documented volatility-regime rule, and every ledger record states which of the two made the call.
-- **No Sharpe is reported below twenty observations.** A handful of trades with
-  similar results produces a ratio in the hundreds; that is a small denominator, not
-  an edge, and printing it would be the most misleading number this project could
-  publish. Over a four-session window this means no Sharpe is reported at all, which
-  is the correct outcome rather than a gap.
-- **A handful of sessions is not a track record.** Alpaca's calendar puts six in this window (Aug 28, 31, Sep 1, 2, 3, 4), and CONVEX will trade fewer. P&L across it is substantially variance. The reproducible parts of this project are the cost discipline, the risk checks and the receipts.
-
----
-
-## Licence
-
-MIT.

@@ -102,12 +102,25 @@ def _leg_fills(parent: dict[str, Any], context: str) -> tuple[Fill, ...]:
 
 
 def _entry_sources(records: Iterable[dict[str, Any]]) -> list[tuple[dict[str, Any], dict[str, Any]]]:
-    submissions: dict[tuple[str, str], dict[str, Any]] = {}
+    """Pair each verified entry with its matching submission evidence.
+
+    A retry has a distinct client order ID. Older retry receipts sometimes
+    recorded only the changed limit and relied on the subsequent verified-fill
+    receipt for the legs. Selecting the last submission by cycle/family loses
+    those legs and makes an otherwise auditable broker fill unreconcilable.
+    Match by client ID first, then complete any omitted immutable structure
+    fields from the verified fill receipt itself.
+    """
+    submissions_by_cycle: dict[tuple[str, str], dict[str, Any]] = {}
+    submissions_by_client_id: dict[str, dict[str, Any]] = {}
     corrected: set[str] = set()
     for record in records:
         action = record.get("action")
         if action == Action.ORDER_SUBMITTED.value:
-            submissions[(str(record.get("cycle_id")), str(record.get("structure")))] = record
+            submissions_by_cycle[(str(record.get("cycle_id")), str(record.get("structure")))] = record
+            client_order_id = str(record.get("client_order_id") or "")
+            if client_order_id:
+                submissions_by_client_id[client_order_id] = record
         if action == Action.ORDER_RECONCILED.value:
             order_id = str(record.get("entry_order_id", ""))
             if order_id:
@@ -118,9 +131,17 @@ def _entry_sources(records: Iterable[dict[str, Any]]) -> list[tuple[dict[str, An
         if record.get("action") != Action.ORDER_FILLED.value:
             continue
         order_id = str((record.get("outcome") or {}).get("order_id", ""))
-        submitted = submissions.get((str(record.get("cycle_id")), str(record.get("structure"))))
-        if order_id and submitted is not None and order_id not in corrected:
-            sources.append((record, submitted))
+        client_order_id = str(record.get("client_order_id") or (record.get("outcome") or {}).get("client_order_id") or "")
+        submitted = submissions_by_client_id.get(client_order_id)
+        if submitted is None:
+            submitted = submissions_by_cycle.get((str(record.get("cycle_id")), str(record.get("structure"))))
+        if not order_id or submitted is None or order_id in corrected:
+            continue
+        complete = dict(submitted)
+        for field in ("legs", "contracts", "cost_breakdown", "net_price"):
+            if complete.get(field) is None and record.get(field) is not None:
+                complete[field] = record[field]
+        sources.append((record, complete))
     return sources
 
 
@@ -165,60 +186,76 @@ def reconcile(gateway, ledger: Ledger, *, write: bool = False) -> list[dict[str,
             )
         entries.append(Entry(source, submitted, parent, legs))
 
-    close_fills: list[tuple[dict[str, Any], Fill]] = []
-    for source in _close_sources(records):
-        order_id = str((source.get("outcome") or {}).get("order_id"))
-        close_fills.append((source, _full_fill(gateway.order_raw(order_id), f"close {order_id}")))
-
-    close_fills.sort(key=lambda pair: str(pair[0].get("ts", "")))
-    remaining = [
-        {"source": source, "fill": fill, "left": fill.quantity}
-        for source, fill in close_fills
-    ]
-
-    allocations: dict[str, list[Fill]] = {}
-    for entry in entries:
-        allocated: list[Fill] = []
-        for leg in entry.legs:
-            needed = leg.quantity
-            expected_close_side = "sell" if leg.side == "buy" else "buy"
-            for close in remaining:
-                fill = close["fill"]
-                if needed == 0:
-                    break
-                if fill.symbol != leg.symbol or fill.side != expected_close_side or close["left"] == 0:
-                    continue
-                quantity = min(needed, close["left"])
-                allocated.append(Fill(fill.order_id, fill.symbol, fill.side, quantity, fill.price))
-                needed -= quantity
-                close["left"] -= quantity
-            if needed:
-                raise DataError(
-                    f"{entry.parent['id']}: {leg.symbol} has {needed} contracts without a "
-                    "verified matching close"
-                )
-        allocations[str(entry.parent["id"])] = allocated
-
-    unmatched = [item for item in remaining if item["left"]]
-    if unmatched:
-        raise DataError(
-            "broker closes could not be assigned to a recorded entry: "
-            + ", ".join(f"{item['fill'].symbol} x{item['left']}" for item in unmatched)
-        )
-
+    # Broker activity is authoritative for closes. Legacy manager receipts can
+    # be incomplete when a later retry filled after an earlier close request
+    # was rejected; activity records still contain every executed child leg.
+    # Read every fill on each entry day, remove verified entry legs, then match
+    # only the remaining fills to the opposite side of the recorded structure.
     by_day: dict[date, list[Entry]] = defaultdict(list)
     for entry in entries:
         by_day[_entry_date(entry.source)].append(entry)
 
-    results: list[dict[str, Any]] = []
+    activities_by_day: dict[date, list[dict[str, Any]]] = {}
+    allocations: dict[str, list[Fill]] = {}
     for day, day_entries in sorted(by_day.items()):
         activities = gateway.account_activities(
             after=day, before=day + timedelta(days=1), activity_types=""
         )
+        activities_by_day[day] = activities
+        entry_order_ids = {leg.order_id for entry in day_entries for leg in entry.legs}
+        remaining = []
+        for activity in activities:
+            if str(activity.get("activity_type", "")).upper() != "FILL":
+                continue
+            fill = Fill(
+                order_id=str(_value(activity, "order_id", "fill activity")),
+                symbol=str(_value(activity, "symbol", "fill activity")),
+                side=str(_value(activity, "side", "fill activity")).lower(),
+                quantity=_quantity(activity, "qty", "fill activity"),
+                price=_decimal(activity, "price", "fill activity"),
+            )
+            if fill.order_id not in entry_order_ids:
+                remaining.append({"fill": fill, "left": fill.quantity})
+
+        for entry in sorted(day_entries, key=lambda item: str(item.source.get("ts", ""))):
+            allocated: list[Fill] = []
+            for leg in entry.legs:
+                needed = leg.quantity
+                expected_close_side = "sell" if leg.side == "buy" else "buy"
+                for close in remaining:
+                    fill = close["fill"]
+                    if needed == 0:
+                        break
+                    if fill.symbol != leg.symbol or fill.side != expected_close_side or close["left"] == 0:
+                        continue
+                    quantity = min(needed, close["left"])
+                    allocated.append(Fill(fill.order_id, fill.symbol, fill.side, quantity, fill.price))
+                    needed -= quantity
+                    close["left"] -= quantity
+                if needed:
+                    raise DataError(
+                        f"{entry.parent['id']}: {leg.symbol} has {needed} contracts without a "
+                        "verified matching broker close"
+                    )
+            allocations[str(entry.parent["id"])] = allocated
+
+        unmatched = [item for item in remaining if item["left"]]
+        if unmatched:
+            raise DataError(
+                f"{day}: broker closes could not be assigned to a recorded entry: "
+                + ", ".join(f"{item['fill'].symbol} x{item['left']}" for item in unmatched)
+            )
+
+    results: list[dict[str, Any]] = []
+    for day, day_entries in sorted(by_day.items()):
+        activities = activities_by_day[day]
         fee_total = -sum(
-            _decimal(activity, "net_amount", "fee activity")
-            for activity in activities
-            if str(activity.get("activity_type", "")).upper() == "FEE"
+            (
+                _decimal(activity, "net_amount", "fee activity")
+                for activity in activities
+                if str(activity.get("activity_type", "")).upper() == "FEE"
+            ),
+            Decimal("0"),
         )
         activity_quantity = sum(
             _quantity(activity, "qty", "fill activity")

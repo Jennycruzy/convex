@@ -13,10 +13,13 @@ from datetime import date, datetime, timedelta, timezone
 
 import pytest
 
+from convex.config import load
 from convex.errors import DataError, ExecutionError
 from convex.instruments import OptionContract, Quote, Right, parse_occ_symbol
+from convex.ledger import Action, Ledger, Record
 from convex.manager import (
     OpenLeg,
+    PositionManager,
     Trigger,
     closing_limit,
     legs_to_close,
@@ -124,15 +127,14 @@ def test_the_kill_switch_takes_everything_including_worthless_longs():
     assert len(legs_to_close(legs, [Trigger.KILL_SWITCH], spot=650.0, pin_band=1.0)) == 2
 
 
-def test_shorts_are_always_closed_before_longs():
+def test_daily_loss_marks_every_leg_for_an_atomic_close():
     legs = [
         open_leg(650.0, Right.PUT, 1),
         open_leg(645.0, Right.PUT, -2),
         open_leg(635.0, Right.PUT, 1),
     ]
-    order = legs_to_close(legs, [Trigger.DAILY_LOSS_LIMIT], spot=640.0, pin_band=1.0)
-    assert order[0].is_short
-    assert not any(leg.is_short for leg in order[1:])
+    selected = legs_to_close(legs, [Trigger.DAILY_LOSS_LIMIT], spot=640.0, pin_band=1.0)
+    assert set(selected) == set(legs)
 
 
 # ------------------------------------------------------------------ close price
@@ -152,6 +154,46 @@ def test_closing_a_long_with_no_bid_raises_rather_than_pricing_it_at_zero():
 
 
 # ------------------------------------------------------------------- settlement
+
+
+def test_settlement_ignores_a_canceled_zero_fill_submission(tmp_path):
+    ledger = Ledger(tmp_path / "decisions.jsonl")
+    manager = PositionManager(None, load(), ledger)
+    legs = [
+        {"symbol": "SPY260828P00650000", "ratio": 1},
+        {"symbol": "SPY260828P00645000", "ratio": -2},
+        {"symbol": "SPY260828P00635000", "ratio": 1},
+    ]
+    ledger.append(Record(
+        action=Action.ORDER_SUBMITTED, cycle_id="canceled", structure="put_bwb",
+        rationale="submitted", legs=legs, contracts=1, net_price=-0.20,
+    ))
+    ledger.append(Record(
+        action=Action.ORDER_REJECTED, cycle_id="canceled", structure="put_bwb",
+        rationale="canceled without a fill", outcome={"status": "canceled", "filled_qty": "0"},
+    ))
+
+    assert manager.settle(date.today(), 660.0) == []
+    assert not any(record.get("action") == Action.POSITION_CLOSED.value for record in ledger.read())
+
+
+def test_settlement_requires_a_verified_full_fill(tmp_path):
+    ledger = Ledger(tmp_path / "decisions.jsonl")
+    manager = PositionManager(None, load(), ledger)
+    legs = [
+        {"symbol": "SPY260828P00650000", "ratio": 1},
+        {"symbol": "SPY260828P00645000", "ratio": -2},
+        {"symbol": "SPY260828P00635000", "ratio": 1},
+    ]
+    ledger.append(Record(
+        action=Action.ORDER_FILLED, cycle_id="filled", structure="put_bwb",
+        rationale="broker verified", legs=legs, contracts=1, net_price=-0.20,
+        outcome={"status": "filled", "filled_qty": "1", "order_id": "entry-1"},
+    ))
+
+    assert manager.settle(date.today(), 660.0) == [
+        {"structure": "put_bwb", "cycle_id": "filled", "realised_pnl": 20.0}
+    ]
 
 
 def test_a_broken_wing_butterfly_entered_for_a_credit_keeps_it_above_every_strike():

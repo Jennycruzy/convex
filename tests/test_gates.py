@@ -18,6 +18,8 @@ from convex.gates import (
     CalibrationGate,
     GateContext,
     LiquidityGate,
+    NetOfCostGate,
+    PositiveNetEdgeBoundGate,
     run_candidate_gates,
     run_session_gates,
 )
@@ -270,8 +272,8 @@ def test_candidate_gates_pass_on_a_reasonable_structure(config, tmp_path):
         family=Family.PUT_BWB,
         legs=(
             leg(652.0, Right.PUT, 3.00, 3.02, +1),
-            leg(650.0, Right.PUT, 1.80, 1.82, -2),
-            leg(647.0, Right.PUT, 0.40, 0.42, +1),
+            leg(650.0, Right.PUT, 1.800, 1.816, -2),
+            leg(647.0, Right.PUT, 0.400, 0.404, +1),
         ),
         description="tight put broken-wing butterfly",
     )
@@ -290,6 +292,38 @@ def test_candidate_gates_pass_on_a_reasonable_structure(config, tmp_path):
     assert report.passed, [f.detail for f in report.failures]
 
 
+def test_the_net_of_cost_gate_rejects_a_nominal_remaining_edge(config, tmp_path):
+    from types import SimpleNamespace
+
+    report = NetOfCostGate().check(
+        context(config, tmp_path),
+        SimpleNamespace(),
+        SimpleNamespace(
+            net_edge=2.30,
+            gross_edge=14.09,
+            cost=SimpleNamespace(total=11.79, leg_count=3),
+        ),
+        None,
+    )
+    assert not report.passed
+    assert report.threshold == 25.0
+    assert "required minimum" in report.detail
+
+
+def test_lower_confidence_bound_rejects_a_nominally_positive_edge(config, tmp_path):
+    from types import SimpleNamespace
+
+    report = PositiveNetEdgeBoundGate().check(
+        context(config, tmp_path),
+        SimpleNamespace(),
+        SimpleNamespace(net_edge_lower_bound=lambda confidence: -12.34),
+        None,
+    )
+    assert not report.passed
+    assert report.threshold == 0.01
+    assert "lower bound" in report.detail
+
+
 def test_the_net_of_cost_gate_rejects_a_structure_cost_has_eaten(config, tmp_path, scenarios):
     wide = [
         leg(650.0, Right.PUT, 2.50, 3.60, +1),
@@ -303,6 +337,26 @@ def test_the_net_of_cost_gate_rejects_a_structure_cost_has_eaten(config, tmp_pat
     size = size_position(priced, PortfolioState(100_000.0, 200_000.0, 0, 0.0), config)
     report = run_candidate_gates(context(config, tmp_path), subject, priced, size)
     assert "net_of_cost" in {failure.name for failure in report.failures}
+
+
+def test_calibration_cannot_loosen_the_validated_admission_cap(
+    config, tmp_path, candidate, estimate
+):
+    values = {
+        **config.values,
+        "liquidity": {
+            **config.values["liquidity"],
+            "max_relative_spread": 0.0513,
+        },
+    }
+    observed_wider = type(config)(
+        path=config.path, loaded_mtime=config.loaded_mtime, values=values
+    )
+    report = LiquidityGate().check(
+        context(observed_wider, tmp_path), candidate, estimate, None
+    )
+    assert report.threshold == pytest.approx(0.01)
+    assert "hard cap 1.0%" in report.detail
 
 
 def test_liquidity_rejects_a_leg_quoted_too_wide(config, tmp_path, scenarios):

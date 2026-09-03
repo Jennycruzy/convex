@@ -171,6 +171,29 @@ em { color: var(--ink); font-style: normal; text-decoration: underline;
 .dim { color: var(--ink-dim); } .faint { color: var(--ink-faint); }
 .good { color: var(--up); } .bad { color: var(--down); }
 
+/* SVG inherits browser defaults unless these classes are defined. The default
+   SVG text fill is black, which made strike markers and the cost waterfall
+   unreadable on the dark terminal. Values have a panel-colour halo so they
+   remain legible when they sit directly over a saturated bar. */
+.chart { display: block; width: 100%; height: auto; overflow: visible; }
+.chart text { font-family: var(--mono); }
+.axis { stroke: var(--rule-hi); stroke-width: 1; }
+.bar-total { fill: var(--up); }
+.bar-negative { fill: var(--down); }
+.bar-cost { fill: var(--cost); }
+.bar-value {
+  fill: var(--ink-hi); font-size: 12px; font-weight: 700; text-anchor: middle;
+  paint-order: stroke; stroke: var(--panel); stroke-width: 1.25px; stroke-linejoin: round;
+}
+.bar-label { fill: var(--ink); font-size: 12px; font-weight: 650; text-anchor: middle; }
+.axis-label { fill: var(--ink-dim); font-size: 11px; font-weight: 600; }
+.chart-note { fill: var(--ink); font-size: 12px; font-weight: 600; }
+.marker-breakeven { stroke: var(--key-hot); stroke-width: 1.5; stroke-dasharray: 3 3; }
+.marker-spot { stroke: var(--ink-dim); stroke-width: 1.25; stroke-dasharray: 2 4; }
+.pay-line { fill: none; stroke: var(--ink-hi); stroke-width: 2; }
+.pay-fill-up { fill: var(--up); opacity: 0.16; }
+.pay-fill-down { fill: var(--down); opacity: 0.16; }
+
 /* Uppercase micro-labels, the terminal's own voice for a field name. */
 .eyebrow, .tile-key, th, .badge, .stat-key {
   font-size: var(--t-micro);
