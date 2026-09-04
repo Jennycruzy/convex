@@ -6,6 +6,7 @@
 > ## Start here — hackathon submission
 >
 > **[Open the live demo →](https://convex.isobars.xyz)**<br>
+> **[Watch the demo video →](https://x.com/jennyoliver57/status/2095880230338453784)**<br>
 > **[Read the one-page build brief →](docs/WRITEUP.md)**<br>
 > **[Download the presentation →](https://convex.isobars.xyz/download/convex-deck)**
 >
