@@ -8,6 +8,7 @@ than being smoothed into one summary number.
 
 from __future__ import annotations
 
+import re
 from datetime import date, timedelta
 
 import numpy as np
@@ -294,3 +295,37 @@ def test_a_curve_that_ends_under_water_is_coloured_as_a_loss():
     winning = charts.equity_svg([5.0, 9.0], [2.0, 8.0])
     assert "var(--down)" in losing and "var(--up)" not in losing
     assert "var(--up)" in winning
+
+
+def _end_labels(drawn: str) -> list[tuple[float, str]]:
+    """The two figures parked at the right edge, as (y, text).
+
+    The axis ticks are right-anchored too, so they are filtered out by the one
+    thing that separates them: an end label names its series.
+    """
+    found = re.findall(r"(<text[^>]*text-anchor='end'[^>]*>)([^<]*)</text>", drawn)
+    return [
+        (float(re.search(r"y='([\d.]+)'", tag).group(1)), text)
+        for tag, text in found
+        if " net" in text or " gross" in text or " before fees" in text
+    ]
+
+
+def test_two_series_finishing_together_do_not_print_one_label_over_the_other():
+    """Both end labels hang off the same edge, so near-equal ends collide.
+
+    The account's own chart finishes 6.62 apart on a range of about 1,200,
+    which put the two figures 0.7 pixels apart and made both unreadable.
+    """
+    labels = _end_labels(
+        charts.equity_svg([-560.0, -840.0, -1020.0], [-565.3, -846.62, -1026.62])
+    )
+    assert len(labels) == 2, labels
+    assert abs(labels[0][0] - labels[1][0]) >= charts.LABEL_GAP
+
+
+def test_series_finishing_far_apart_keep_their_own_positions():
+    """The lift is only for a collision; a wide gap is left where it falls."""
+    labels = _end_labels(charts.equity_svg([100.0, 16218.68], [50.0, 3375.53]))
+    assert len(labels) == 2, labels
+    assert abs(labels[0][0] - labels[1][0]) > charts.LABEL_GAP * 4

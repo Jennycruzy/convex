@@ -44,6 +44,11 @@ COMPONENTS = (
 )
 
 
+# Minimum vertical distance between the two end-of-line labels on the equity
+# chart. Twelve point text needs about this much before the glyphs touch.
+LABEL_GAP = 15.0
+
+
 def _money(value: float) -> str:
     return f"{value:+,.2f}"
 
@@ -471,13 +476,23 @@ def equity_svg(
 
     # Where each series finishes, which is the only pair of values a reader
     # needs to take away from the chart.
+    #
+    # Both labels hang off the same right edge, so when the two series finish
+    # close together their natural positions collide and the two figures print
+    # on top of each other. The pale series is never below the solid one -- it
+    # is the solid one with a cost added back -- so its label is lifted clear
+    # rather than allowed to overlap.
+    net_label_y = sy(net[last]) - 12
+    pale_label_y = sy(gross[last]) - 10
+    if net_label_y - pale_label_y < LABEL_GAP:
+        pale_label_y = net_label_y - LABEL_GAP
     out.append(
         f"<circle cx='{sx(last):.1f}' cy='{sy(net[last]):.1f}' r='4.5' fill='{colour}' "
         f"stroke='var(--panel)' stroke-width='2'>"
         f"<title>net {_money(net[last])} after {len(net)} trades</title></circle>"
-        f"<text x='{sx(last):.1f}' y='{sy(net[last]) - 12:.1f}' fill='{colour}' "
+        f"<text x='{sx(last):.1f}' y='{net_label_y:.1f}' fill='{colour}' "
         f"font-size='12' font-weight='600' text-anchor='end'>{_money(net[last])} net</text>"
-        f"<text x='{sx(last):.1f}' y='{sy(gross[last]) - 10:.1f}' fill='var(--ink-dim)' "
+        f"<text x='{sx(last):.1f}' y='{pale_label_y:.1f}' fill='var(--ink-dim)' "
         f"font-size='11' text-anchor='end'>{_money(gross[last])} {gross_label}</text>"
     )
 
