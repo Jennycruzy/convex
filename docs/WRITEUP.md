@@ -30,15 +30,17 @@ The gap-continuation vertical is still research evidence, not a proven winner: t
 
 ## What it actually did
 
-Three verified fills, reconciled against broker records, not inferred from submitted orders:
+Three verified fills, reconciled against broker records, not inferred from submitted orders. The date is the session the structure was entered and expired; the two 31 August structures were reconciled the following morning, once the broker's own fill records were available.
 
-| Date | Structure | Lots | Net P&L |
+| Entered | Structure | Lots | Net P&L |
 |---|---|---:|---:|
-| 1 Sep | put_bwb | 14 | −$565.30 |
-| 1 Sep | straddle | 7 | −$281.32 |
+| 31 Aug | put_bwb | 14 | −$565.30 |
+| 31 Aug | straddle | 7 | −$281.32 |
 | 2 Sep | call_bwb | 6 | −$180.00 |
 
-**Total −$1,026.62, or −1.03% on the $100,000 account.**
+Those three sum to **−$1,026.62**, net of the $6.62 of day-level broker fees allocated at reconciliation. The account itself closed at **$98,970.95** against the $100,000 it opened with, so the figure a judge reads off Alpaca is **−$1,029.05, or −1.03%**.
+
+The $2.43 between the two is the 2 September fee bill: $1.20 OCC, $0.72 ORF, $0.42 REG, $0.07 TAF, $0.02 CAT, total broker fees for the account $9.05. Those rows carry broker timestamps from earlier that evening but were not returned by the activities query the reconciler ran at 22:09 UTC, so receipt 147 allocated them as zero. Both numbers are stated rather than the one that flatters, because the ledger total and the account balance are different quantities and a reader can check each against the source.
 
 The third trade needs disclosing. On 2 September a tournament profile was authorized to submit one BWB structure (ledger receipt 102) after the audit had already disabled that family. It filled six contracts and lost $180. That one-off BWB profile has since been removed; it is not the current gap-continuation runner. We are reporting this because the ledger records it and a reader can find it; the alternative is a write-up the receipts contradict.
 
