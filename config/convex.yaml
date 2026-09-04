@@ -109,6 +109,14 @@ execution:
   order_status_timeout_seconds: 30
   order_poll_seconds: 1
 
+  # A canceled entry with nothing filled is a quote that moved away, not a
+  # refusal by the risk rules. Each rung re-reads the account, clock, spot and
+  # option quotes, re-runs every session and candidate gate, and re-sizes before
+  # submitting one tick further across the spread; a rung that no longer clears
+  # a gate writes its receipt and stops. Ticks are in costs.tick_size units.
+  # An empty list disables the retry and a canceled entry ends the cycle.
+  reprice_ticks: [1, 2]
+
 liquidity:
   # The classified replay remains positive through a 1.0% relative spread per
   # leg and turns negative at 1.5%. This is intentionally stricter than the
@@ -116,7 +124,7 @@ liquidity:
   # one. Wide books produce a documented refusal, never a desperation fill.
   # `max_relative_spread` is refreshed from the live book at 09:55. It is an
   # observation, not permission to loosen the P&L rule below.
-  max_relative_spread: 0.0100       # MEASURED/observed; refreshed by calibration
+  max_relative_spread: 0.0311       # MEASURED 2026-09-03 by scripts/calibrate_costs.py
   # Hard policy ceiling validated by the spread-sensitivity replay. Calibration
   # must never turn this into the wider raw-book percentile.
   admission_spread_cap: 0.0100      # VALIDATED P&L admission cap
@@ -175,6 +183,17 @@ strategy:
   # The installed 10:00 ET timer dispatches to this isolated profile. The
   # legacy structures list remains empty, so it cannot open a generic vertical.
   active_profile: gap_continuation_vertical
+  gap_continuation:
+    # Research-policy inputs for the bounded paper profile. These are strategy
+    # hypotheses, not calibration measurements; profile_backtest.py must clear
+    # the same untouched holdout before any value is promoted.
+    minimum_gap: 0.003
+    minimum_vwap_distance: 0.0
+    # The existing confidence gate expects a score. This fixed score is an
+    # integration value for a deterministic rule, not a calibrated forecast.
+    admission_score: 0.75
+    execution_start: "10:01"
+    execution_end: "10:03"
 
 structures:
   # Disabled after the 2026-09-02 chronological audit. At a 1.0% per-leg

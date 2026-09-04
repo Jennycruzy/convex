@@ -1,4 +1,6 @@
-alpaca-py>=0.33
+alpaca-mcp-server>=2.3
+fastmcp<4,>=3.1
+mcp>=1.9
 pandas>=2.2
 numpy>=1.26
 scikit-learn>=1.5
@@ -10,8 +12,8 @@ pandas-market-calendars>=4.4
 [dashboard]
 fastapi>=0.115
 uvicorn>=0.30
-jinja2>=3.1
 
 [dev]
 pytest>=8.0
 ruff>=0.6
+httpx>=0.27

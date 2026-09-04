@@ -1,19 +1,11 @@
 {
-  "built_at": "2026-09-02T16:20:17.072877-04:00",
+  "built_at": "2026-09-03T16:20:34.582558-04:00",
   "symbol": "SPY",
   "entry_time": "10:00:00",
   "close_time": "16:00:00",
   "sessions": 551,
   "note": "Implied variance at the entry minute, solved from the option tape by the same code the training rows use. Not recorded live: these sessions were rebuilt, so the book is gone and only prints survive.",
   "series": [
-    {
-      "session": "2024-06-24",
-      "iv_total": 0.03272833000012249,
-      "iv_up": 0.016303514940302136,
-      "iv_dn": 0.016424815059820356,
-      "spot_at_entry": 545.72,
-      "coverage": 0.6363636363636364
-    },
     {
       "session": "2024-06-25",
       "iv_total": 0.035149823817465425,
@@ -4413,6 +4405,14 @@
       "iv_dn": 0.017997769269740803,
       "spot_at_entry": 763.26,
       "coverage": 0.532258064516129
+    },
+    {
+      "session": "2026-09-03",
+      "iv_total": 0.023919310365482917,
+      "iv_up": 0.013289194258648543,
+      "iv_dn": 0.010630116106834375,
+      "spot_at_entry": 768.78,
+      "coverage": 0.45161290322580644
     }
   ]
 }

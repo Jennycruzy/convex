@@ -169,7 +169,6 @@ def fit_family(
 
     standardised, mean, scale = _standardise(matrix)
     model = LogisticRegression(
-        penalty="l2",
         C=config.float_("classifier.l2_c"),
         solver="lbfgs",
         max_iter=2_000,

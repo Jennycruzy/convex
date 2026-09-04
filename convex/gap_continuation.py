@@ -40,6 +40,7 @@ def signal(
     prior_close: float,
     minimum_gap: float = 0.003,
     signal_time: time = time(10, 0),
+    minimum_vwap_distance: float = 0.0,
 ) -> GapContinuationSignal | None:
     """Return the continuation direction, or ``None`` when the rule does not fire.
 
@@ -51,6 +52,10 @@ def signal(
         raise DataError(f"prior close must be positive, found {prior_close}")
     if minimum_gap <= 0.0:
         raise DataError(f"minimum gap must be positive, found {minimum_gap}")
+    if minimum_vwap_distance < 0.0:
+        raise DataError(
+            f"minimum VWAP distance must not be negative, found {minimum_vwap_distance}"
+        )
     required = {"open", "close", "volume"}
     missing = required - set(bars.columns)
     if missing:
@@ -65,7 +70,13 @@ def signal(
     price = float(session.iloc[-1]["close"])
     vwap = float((session["close"].astype(float) * volume).sum() / volume.sum())
     gap = opening / prior_close - 1.0
-    direction = 1 if gap >= minimum_gap and price > vwap else -1 if gap <= -minimum_gap and price < vwap else 0
+    direction = (
+        1
+        if gap >= minimum_gap and price > vwap * (1.0 + minimum_vwap_distance)
+        else -1
+        if gap <= -minimum_gap and price < vwap * (1.0 - minimum_vwap_distance)
+        else 0
+    )
     if direction == 0:
         return None
     return GapContinuationSignal(session.index[-1].date(), direction, gap, price, vwap)

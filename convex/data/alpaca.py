@@ -283,8 +283,12 @@ class AlpacaGateway:
             sessions.append(
                 MarketSession(
                     session_date=session_date,
-                    open_at=self._exchange_time(session_date, str(_require(day, "open", "get_calendar"))),
-                    close_at=self._exchange_time(session_date, str(_require(day, "close", "get_calendar"))),
+                    open_at=self._exchange_time(
+                        session_date, str(_require(day, "open", "get_calendar"))
+                    ),
+                    close_at=self._exchange_time(
+                        session_date, str(_require(day, "close", "get_calendar"))
+                    ),
                 )
             )
         return sorted(sessions, key=lambda session: session.session_date)
@@ -390,9 +394,7 @@ class AlpacaGateway:
         )
         if not contracts:
             raise DataError(f"Alpaca lists no {symbol} contracts expiring near {on_or_before}")
-        return sorted(
-            {date.fromisoformat(str(row["expiration_date"])) for row in contracts}
-        )
+        return sorted({date.fromisoformat(str(row["expiration_date"])) for row in contracts})
 
     def chain(
         self,
@@ -750,9 +752,7 @@ class AlpacaGateway:
         the cycle; it must never guess whether a write reached the account.
         """
         if timeout_seconds <= 0.0:
-            raise ExecutionError(
-                f"cannot wait for order {order_id} with a non-positive timeout"
-            )
+            raise ExecutionError(f"cannot wait for order {order_id} with a non-positive timeout")
         if poll_seconds <= 0.0:
             raise ExecutionError(
                 f"cannot wait for order {order_id} with a non-positive poll interval"

@@ -2,8 +2,9 @@
 
 The production configuration remains entry-disabled.  This runner enables only
 ``debit_vertical`` in memory after the signal is observed, then lets the normal
-Agent apply its full session and candidate-gate stack.  It never retries an
-unfilled order and it cannot place more than one contract.
+Agent apply its full session and candidate-gate stack.  A canceled zero-fill
+entry uses the configured fresh-quote retry ladder, and it cannot place more
+than one contract.
 """
 
 from __future__ import annotations
@@ -16,17 +17,19 @@ from time import sleep
 from zoneinfo import ZoneInfo
 
 from convex.agent import Agent
-from convex.config import load
+from convex.config import Config, load
 from convex.data.alpaca import AlpacaGateway
 from convex.errors import ConvexError, DataError
-from convex.gap_continuation import signal
+from convex.gap_continuation import GapContinuationSignal, signal
 from convex.ledger import Action, Ledger, Record, new_cycle_id
 from convex.scenarios import build as build_scenarios
 from convex.scenarios import save as save_scenarios
 
 SUBMISSION_CUTOFF = datetime(2026, 9, 4, 11, 0, tzinfo=ZoneInfo("America/New_York"))
-PROFILE_PROBABILITY = 0.75
-PROFILE_SOURCE = "gap-continuation profile: 9/12 positive reconstructed held-out verticals"
+PROFILE_SOURCE = (
+    "gap-continuation profile: deterministic signal; admission score is not a "
+    "calibrated probability"
+)
 
 
 class DryRunGateway:
@@ -61,18 +64,38 @@ def family_results(ledger: Ledger) -> dict[str, list[float]]:
             continue
         outcome = record.get("outcome") or {}
         if record.get("structure") and "realised_pnl" in outcome:
-            history[str(record["structure"])] .append(float(outcome["realised_pnl"]))
+            history[str(record["structure"])].append(float(outcome["realised_pnl"]))
     return dict(history)
 
 
-def observed_signal(gateway: AlpacaGateway, now: datetime, minimum_gap: float):
+def _configured_time(config: Config, key: str) -> time:
+    raw = config.str_(key)
+    try:
+        return time.fromisoformat(raw)
+    except ValueError as error:
+        raise DataError(f"{key} must be an ISO time, found {raw!r}") from error
+
+
+def observed_signal(
+    gateway: AlpacaGateway, now: datetime, config: Config
+) -> GapContinuationSignal | None:
     """Read the completed 10:00 bar and the preceding session close."""
-    zone = ZoneInfo("America/New_York")
+    zone = ZoneInfo(config.str_("session.timezone"))
+    signal_time = _configured_time(config, "session.entry_time")
+    execution_start = _configured_time(config, "strategy.gap_continuation.execution_start")
+    execution_end = _configured_time(config, "strategy.gap_continuation.execution_end")
+    if execution_start > execution_end:
+        raise DataError("gap profile execution_start must not be after execution_end")
     if now.tzinfo is None:
         raise DataError("exchange clock must carry a timezone")
     local_now = now.astimezone(zone)
-    if not time(10, 1) <= local_now.time() <= time(10, 3):
-        raise DataError("gap profile only permits execution from 10:01 to 10:03 ET")
+    if not execution_start <= local_now.time() <= execution_end:
+        raise DataError(
+            f"gap profile only permits execution from "
+            f"{execution_start.isoformat(timespec='minutes')} to "
+            f"{execution_end.isoformat(timespec='minutes')} {zone.key}"
+        )
+    symbol = config.str_("underlying.symbol")
     sessions = gateway.sessions(local_now.date() - timedelta(days=10), local_now.date())
     dates = [session.session_date for session in sessions]
     previous = [day for day in dates if day < local_now.date()]
@@ -80,12 +103,21 @@ def observed_signal(gateway: AlpacaGateway, now: datetime, minimum_gap: float):
         raise DataError("no current and prior Alpaca trading session for gap signal")
     prior_day = previous[-1]
     start = datetime.combine(prior_day, time(9, 30), tzinfo=zone)
-    bars = gateway.minute_bars("SPY", start, local_now).tz_convert(zone)
-    prior = bars[bars.index.date == prior_day].between_time("09:30", "16:00")
+    bars = gateway.minute_bars(symbol, start, local_now).tz_convert(zone)
+    close_time = _configured_time(config, "session.close_time")
+    prior = bars[bars.index.date == prior_day].between_time(
+        "09:30", close_time.isoformat(timespec="minutes")
+    )
     today = bars[bars.index.date == local_now.date()]
     if prior.empty:
         raise DataError(f"no regular-session bars for prior session {prior_day}")
-    return signal(today, float(prior.iloc[-1]["close"]), minimum_gap)
+    return signal(
+        today,
+        float(prior.iloc[-1]["close"]),
+        minimum_gap=config.float_("strategy.gap_continuation.minimum_gap"),
+        signal_time=signal_time,
+        minimum_vwap_distance=config.float_("strategy.gap_continuation.minimum_vwap_distance"),
+    )
 
 
 def main() -> int:
@@ -105,14 +137,18 @@ def main() -> int:
     live = AlpacaGateway(base)
     ledger = Ledger(base.path_("paths.ledger"))
     now, _ = live.clock()
-    local_now = now.astimezone(ZoneInfo("America/New_York"))
-    # The service starts at 10:00. Wait only for the completed 10:00 minute;
-    # a later invocation is refused by observed_signal rather than traded late.
-    if time(10, 0) <= local_now.time() < time(10, 1):
-        sleep((datetime.combine(local_now.date(), time(10, 1), tzinfo=local_now.tzinfo) - local_now).total_seconds())
+    zone = ZoneInfo(config.str_("session.timezone"))
+    entry_time = _configured_time(config, "session.entry_time")
+    execution_start = _configured_time(config, "strategy.gap_continuation.execution_start")
+    local_now = now.astimezone(zone)
+    # The service starts at the configured entry time. Wait only for the
+    # completed signal minute; a later invocation is refused rather than traded late.
+    if entry_time <= local_now.time() < execution_start:
+        target = datetime.combine(local_now.date(), execution_start, tzinfo=zone)
+        sleep((target - local_now).total_seconds())
         now, _ = live.clock()
     try:
-        found = observed_signal(live, now, minimum_gap=0.003)
+        found = observed_signal(live, now, config)
     except ConvexError as error:
         ledger.append(
             Record(
@@ -153,8 +189,11 @@ def main() -> int:
         dry_run=arguments.dry_run,
         candidate_filter=lambda candidate: candidate.description.startswith(expected_prefix),
         receipt_context=found.as_dict(),
-        reprice_ticks=(),
-        decision_probability=PROFILE_PROBABILITY,
+        # Keep the active profile on the same configured fresh-quote retry
+        # ladder as the generic runner. An empty ladder is an explicit policy;
+        # this profile must not silently choose it by bypassing config.
+        reprice_ticks=tuple(int(tick) for tick in config.list_("execution.reprice_ticks")),
+        decision_probability=config.float_("strategy.gap_continuation.admission_score"),
         decision_source=PROFILE_SOURCE,
     )
     result = agent.run_cycle(

@@ -19,8 +19,8 @@ from html import escape
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse
 
 from convex.config import Config, load
 from convex.dashboard import read
@@ -113,8 +113,15 @@ def _tag(action: str) -> str:
     return f'<span class="badge {css}">{escape(label)}</span>'
 
 
-def _tile(key: str, value: str, note: str = "", count: float | None = None,
-          places: int = 0, prefix: str = "", signed: bool = False) -> str:
+def _tile(
+    key: str,
+    value: str,
+    note: str = "",
+    count: float | None = None,
+    places: int = 0,
+    prefix: str = "",
+    signed: bool = False,
+) -> str:
     """One headline figure.
 
     ``count`` opts the figure into the count-up: the rendered text is already
@@ -123,9 +130,8 @@ def _tile(key: str, value: str, note: str = "", count: float | None = None,
     """
     attrs = ""
     if count is not None:
-        attrs = (
-            f" data-count='{count}' data-places='{places}'"
-            f" data-prefix='{escape(prefix)}'" + (" data-signed" if signed else "")
+        attrs = f" data-count='{count}' data-places='{places}' data-prefix='{escape(prefix)}'" + (
+            " data-signed" if signed else ""
         )
     tail = f"<div class='tile-note'>{escape(note)}</div>" if note else ""
     return (
@@ -174,9 +180,13 @@ def _backtest_panel(report: dict) -> str:
     def row(label: str, arm: dict, emphasis: bool = False) -> None:
         survives = arm.get("net_sharpe")
         verdict = (
-            "<span class='badge stood'>·</span>" if survives is None
-            else ("<span class='tag open'>yes</span>" if survives > 0
-                  else "<span class='tag refused'>no</span>")
+            "<span class='badge stood'>·</span>"
+            if survives is None
+            else (
+                "<span class='tag open'>yes</span>"
+                if survives > 0
+                else "<span class='tag refused'>no</span>"
+            )
         )
         name = f"<strong>{escape(label)}</strong>" if emphasis else escape(label)
         body.append(
@@ -230,7 +240,6 @@ def _backtest_panel(report: dict) -> str:
             "Rerunning the backfill fills in the curve.</p></div>"
         )
     return "".join(body)
-
 
 
 def _realised_panel(records, summary) -> str:
@@ -316,6 +325,18 @@ def create_app(config: Config | None = None) -> FastAPI:
     def healthz() -> str:
         return "ok"
 
+    @app.get("/download/convex-deck")
+    def download_deck() -> FileResponse:
+        """Serve the judge deck as an Office attachment."""
+        deck = Path(__file__).resolve().parents[2] / "docs/presentation/CONVEX_Hackathon_Deck.pptx"
+        if not deck.is_file():
+            raise HTTPException(status_code=404, detail="presentation deck is not available")
+        return FileResponse(
+            deck,
+            media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            filename="CONVEX_Hackathon_Deck.pptx",
+        )
+
     @app.get("/api/ledger")
     def api_ledger() -> JSONResponse:
         """The whole ledger, unedited. The page is a view; this is the source."""
@@ -388,12 +409,15 @@ def create_app(config: Config | None = None) -> FastAPI:
             )
         )
         body.append(
-            _tile("stood down", str(summary.stand_downs), "a first-class outcome",
-                  count=summary.stand_downs)
+            _tile(
+                "stood down",
+                str(summary.stand_downs),
+                "a first-class outcome",
+                count=summary.stand_downs,
+            )
         )
         body.append(
-            _tile("refusal rate", f"{summary.refusal_rate:.0%}",
-                  "low is not obviously good")
+            _tile("refusal rate", f"{summary.refusal_rate:.0%}", "low is not obviously good")
         )
         body.append(
             _tile(
@@ -439,7 +463,8 @@ def create_app(config: Config | None = None) -> FastAPI:
             body.append("</div></div>")
 
         opened = [
-            record for record in reversed(rows)
+            record
+            for record in reversed(rows)
             if record.get("action") == Action.ORDER_FILLED.value
             and str((record.get("outcome") or {}).get("status", "")).lower() == "filled"
             and record.get("legs")
@@ -509,8 +534,7 @@ def _page(body: str) -> str:
         "arithmetic that produced it.'>"
         "<script>" + ui.HEAD_SCRIPT + "</script>"
         "<style>" + ui.stylesheet() + "</style>"
-        "</head><body><div class='wrap'>" + body +
-        "<footer class='foot'>"
+        "</head><body><div class='wrap'>" + body + "<footer class='foot'>"
         "<div>CONVEX · 0DTE SPY structures ranked on edge <strong>net</strong> of "
         "measured execution cost, sized against the tail, reached entirely through "
         "Alpaca's MCP server. Paper account.</div>"
@@ -654,8 +678,7 @@ def _hero(summary, sensitivity: dict) -> str:
             "<div class='v' data-f='net'>--</div></div>"
             "<div><div class='k'>sessions traded</div>"
             "<div class='v' data-f='trades'>--</div></div>"
-            "</div>"
-            + "<p class='note' style='margin-top:16px'><strong>Read this before "
+            "</div>" + "<p class='note' style='margin-top:16px'><strong>Read this before "
             "quoting it.</strong> These sessions were rebuilt from trade prints, "
             "not recorded from the live book, and the spread is modelled rather "
             "than measured. The book for those sessions is gone. Every point is "
@@ -722,11 +745,7 @@ def _decision_log(rows: list[dict[str, Any]], limit: int = 500) -> str:
         "<div class='panel-head'><h3>decision log</h3>",
         f"<div><span class='stat-key'>ENTRIES</span> "
         f"<span class='stat-val'>{len(entries)}</span>"
-        + (
-            f" <span class='faint'>(last {limit} shown)</span>"
-            if len(entries) > limit
-            else ""
-        )
+        + (f" <span class='faint'>(last {limit} shown)</span>" if len(entries) > limit else "")
         + "</div></div>",
         "<div class='log' data-log>",
     ]
@@ -769,9 +788,7 @@ def _decision_log(rows: list[dict[str, Any]], limit: int = 500) -> str:
             "</div>"
         )
         if record.get("rationale"):
-            out.append(
-                f"<div class='log-note'>{escape(str(record['rationale']))}</div>"
-            )
+            out.append(f"<div class='log-note'>{escape(str(record['rationale']))}</div>")
 
     out.append("</div>")
     out.append(

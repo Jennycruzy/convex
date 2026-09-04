@@ -22,10 +22,9 @@ opens nothing and explains why in twelve receipts has done its job.
 
 from __future__ import annotations
 
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field, replace
-from datetime import datetime, time, timedelta
-from pathlib import Path
-from typing import Callable, Sequence
+from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from convex import archive
@@ -38,11 +37,11 @@ from convex.data.alpaca import AlpacaGateway
 from convex.edge import EdgeEstimate, at_limit, evaluate
 from convex.errors import ConvexError, DataError, UndefinedRiskError
 from convex.execution import filled_quantity, outcome_fields, resolve_order
-from convex.gates import GateContext, GateReport, run_candidate_gates, run_session_gates
-from convex.instruments import ChainEntry, Leg
+from convex.gates import GateContext, run_candidate_gates, run_session_gates
+from convex.instruments import ChainEntry
 from convex.ledger import Action, Ledger, Record, new_cycle_id
 from convex.scenarios import ScenarioSet
-from convex.sizing import PortfolioState, SizeDecision, size_position
+from convex.sizing import PortfolioState, size_position
 from convex.structures import build_candidates
 from convex.structures.base import Candidate, Family
 
@@ -78,9 +77,7 @@ def cost_consumed(priced: Sequence[PricedCandidate]) -> list[PricedCandidate]:
     bit. Counting them where they die is what puts the refusal on the record.
     """
     return [
-        item
-        for item in priced
-        if item.estimate.gross_edge > 0.0 and item.estimate.net_edge <= 0.0
+        item for item in priced if item.estimate.gross_edge > 0.0 and item.estimate.net_edge <= 0.0
     ]
 
 
@@ -113,6 +110,17 @@ def rank(priced: Sequence[PricedCandidate], tie_break: Sequence[str]) -> list[Pr
 # Two candidates whose net edges differ by less than this share of the leader's
 # are treated as a tie, and the cheaper one to execute wins.
 _TIE_BAND = 0.10
+
+_CLIENT_ORDER_ID_LIMIT = 48
+
+
+def _entry_client_order_id(cycle_id: str, family: Family | str, attempt: int | None = None) -> str:
+    """Build an entry ID without truncating away a retry discriminator."""
+    suffix = "" if attempt is None else f"-r{attempt}"
+    if len(suffix) >= _CLIENT_ORDER_ID_LIMIT:
+        raise DataError("retry discriminator is too long for a client order id")
+    stem = f"convex-{cycle_id}-{family}"
+    return f"{stem[: _CLIENT_ORDER_ID_LIMIT - len(suffix)]}{suffix}"
 
 
 class Agent:
@@ -582,7 +590,7 @@ class Agent:
         limit_price = round(
             self.cost_model.executable_debit(best.candidate.legs, size.contracts), 2
         )
-        client_order_id = f"convex-{cycle_id}-{family}"[:48]
+        client_order_id = _entry_client_order_id(cycle_id, family)
 
         # The rationale is durable before the order exists, never after. On a
         # dry run the order never comes to exist, so the action says so: a
@@ -799,7 +807,7 @@ class Agent:
                         rationale=f"Reprice rung {attempt} at {limit:.2f} refused: "
                         f"{gates.first_failure.detail if gates.first_failure else 'size is zero'}",
                         reject_reason=(
-                            gates.first_failure.name if gates.first_failure else 'size_is_zero'
+                            gates.first_failure.name if gates.first_failure else "size_is_zero"
                         ),
                         extra={
                             **self.receipt_context,
@@ -809,7 +817,7 @@ class Agent:
                     )
                 )
                 continue
-            client_id = f"convex-{cycle_id}-{family}-r{attempt}"[:48]
+            client_id = _entry_client_order_id(cycle_id, family, attempt)
             self.ledger.append(
                 Record(
                     action=Action.ORDER_SUBMITTED,
@@ -880,7 +888,6 @@ class Agent:
             )
         return False
 
-
     def _fees_paid(self) -> float:
         """Actual settled fees plus a conservative reserve for open verified entries.
 
@@ -920,8 +927,6 @@ class Agent:
             breakdown = record.get("cost_breakdown")
             contracts = record.get("contracts")
             if breakdown is None or contracts is None or "fees" not in breakdown:
-                raise DataError(
-                    f"verified entry {order_id} is missing its fee reserve receipt"
-                )
+                raise DataError(f"verified entry {order_id} is missing its fee reserve receipt")
             reserved += float(breakdown["fees"]) * int(contracts)
         return actual + reserved

@@ -136,6 +136,12 @@ def main() -> int:
         models=models,
         submission_cutoff=SUBMISSION_CUTOFF,
         dry_run=arguments.dry_run,
+        # A canceled entry with 0 filled is the quote moving, not a risk
+        # refusal. Each rung re-reads the market and re-runs every gate before
+        # it reprices, so this widens what the agent will pay, never what it
+        # will accept. Configured, because a ladder nobody chose is a cost
+        # nobody chose.
+        reprice_ticks=tuple(int(tick) for tick in config.list_("execution.reprice_ticks")),
     )
 
     # Implied against implied. The rule used to be handed realised variance out
