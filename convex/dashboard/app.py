@@ -276,9 +276,11 @@ def _cycle_panel(cycle) -> str:
         return ""
     body = [
         _section("last pass", "WHAT IT MADE OF EACH FAMILY"),
-        "<p>One row per structure family: the probability it was given, "
-        "which of the two decided it, and what happened. Standing down is an outcome "
-        "here, not a missing row.</p>",
+        "<p>Every verdict the most recent cycle reached, in the order it "
+        "reached them. A family appears once per verdict, so it can appear "
+        "more than once: refused on one construction, priced on the next. "
+        "A blank probability means the structure was refused before one was "
+        "needed. Standing down is an outcome here, not a missing row.</p>",
         "<div class='panel scroll-x reveal'><table><thead><tr>",
     ]
     for column in ("structure", "p", "decided by", "outcome", "lots", "reason"):
@@ -492,11 +494,22 @@ def create_app(config: Config | None = None) -> FastAPI:
             )
             body.append("<div class='panel-body'>")
             body.append(payoff_svg(curve, breakevens=strikes, spot=spot))
+            # The worst case comes off the curve above rather than the record,
+            # so the figure and the diagram cannot disagree. The stored max
+            # loss was priced before the order went out, against the limit and
+            # with the cost of closing added, and is a different quantity.
+            worst = -min(value for _, value in curve)
+            filled = read.filled_at(record)
+            priced_at = (
+                f"filled at {_number(filled)} net"
+                if filled is not None
+                else f"priced at {_number(record.get('net_price'))} net, no fill on this receipt"
+            )
             body.append(
                 f"<p class='note' style='margin-top:16px'>Worst case "
-                f"{_number(record.get('max_loss'))} · ES(1%) "
-                f"{_number(record.get('es_contribution'))} · entered at "
-                f"{_number(record.get('net_price'))} net.</p>"
+                f"{_number(worst)} at expiry · ES(1%) "
+                f"{_number(record.get('es_contribution'))} estimated before entry, "
+                f"closing cost included · {priced_at}.</p>"
             )
             body.append("</div></div>")
 
@@ -729,7 +742,7 @@ def _decision_log(rows: list[dict[str, Any]], limit: int = 500) -> str:
     Only the last few hundred entries are rendered. The whole thing, unedited,
     is a request away at /api/ledger, and the panel says so.
     """
-    wanted = {action.value for action in read.DECISION_ACTIONS}
+    wanted = {action.value for action in read.LOG_ACTIONS}
     entries = [record for record in rows if record.get("action") in wanted]
     trimmed = entries[-limit:]
 
@@ -769,7 +782,7 @@ def _decision_log(rows: list[dict[str, Any]], limit: int = 500) -> str:
             day = when
             out.append(
                 f"<div class='log-day'><span>{escape(when or 'undated')}</span>"
-                f"<span class='count'>{per_day.get(when, 0)} decisions</span></div>"
+                f"<span class='count'>{per_day.get(when, 0)} entries</span></div>"
             )
         waterfall = record.get("waterfall") or {}
         reason = str(record.get("reject_reason") or "")

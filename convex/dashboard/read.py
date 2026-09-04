@@ -33,6 +33,17 @@ DECISION_ACTIONS = (
     Action.POSITION_CLOSED,
 )
 
+# What the log renders. A correction and a broker reconciliation are not
+# decisions -- they are the record answering for itself afterwards -- so they
+# stay out of DECISION_ACTIONS and the counts built from it. They still have to
+# be visible: a log that shows a closing figure and hides the receipt retracting
+# it is not the append-only record the page says it is.
+LOG_ACTIONS = DECISION_ACTIONS + (
+    Action.ORDER_RECONCILED,
+    Action.POSITION_RECONCILED,
+    Action.CORRECTION,
+)
+
 
 def load(path: Path) -> list[dict[str, Any]]:
     """Every ledger line, oldest first. A malformed line is not skipped."""
@@ -332,6 +343,31 @@ def format_stamp(value: str | None) -> str:
         return value
 
 
+def entry_price(record: dict[str, Any]) -> float:
+    """The price this structure was actually entered at, per share.
+
+    The broker's average fill is the only price the position really has, so it
+    wins whenever the receipt carries one. ``net_price`` is the limit the order
+    went out with, which is what the agent asked for and not what it got. A
+    limit and its fill are routinely different numbers, and a page that draws
+    the limit draws a position nobody holds.
+    """
+    outcome = record.get("outcome") or {}
+    filled = outcome.get("filled_avg_price")
+    if filled is not None and str(filled).strip() != "":
+        return float(filled)
+    return float(record.get("net_price", 0.0))
+
+
+def filled_at(record: dict[str, Any]) -> float | None:
+    """The broker's average fill price, or None when the receipt has no fill."""
+    outcome = record.get("outcome") or {}
+    filled = outcome.get("filled_avg_price")
+    if filled is None or str(filled).strip() == "":
+        return None
+    return float(filled)
+
+
 def payoff_from_record(
     record: dict[str, Any], points: int = 161
 ) -> tuple[list[tuple[float, float]], tuple[float, ...]]:
@@ -348,7 +384,7 @@ def payoff_from_record(
     legs = record.get("legs") or []
     if not legs:
         raise ValueError("this record carries no legs to draw")
-    net_entry = float(record.get("net_price", 0.0))
+    net_entry = entry_price(record)
     multiplier = 100
 
     strikes: list[float] = []

@@ -9,6 +9,7 @@ particular that an empty ledger produces an empty page and not a demo.
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 
 import pytest
 from fastapi.testclient import TestClient
@@ -234,6 +235,39 @@ def test_the_payoff_is_rebuilt_from_the_receipt_not_refetched():
     assert max(value for _, value in curve) > 0
     assert min(value for _, value in curve) == pytest.approx(-960.0)
     assert [value for price, value in curve if price >= 660][0] == pytest.approx(40.0)
+
+
+def test_the_payoff_is_drawn_at_the_fill_not_at_the_limit():
+    """A position is worth what it was filled at, never what was asked for."""
+    record = opened_bwb().__dict__ | {"legs": opened_bwb().legs}
+    record["outcome"] = dict(record["outcome"], filled_avg_price="-0.60")
+    curve, _ = read.payoff_from_record(record)
+    # Two lots, filled for a 0.60 credit instead of the 0.20 limit: the floor
+    # lifts by 0.40 x 100 x 2 and the flat tail rises by the same amount.
+    assert min(value for _, value in curve) == pytest.approx(-880.0)
+    assert next(value for price, value in curve if price >= 660) == pytest.approx(120.0)
+    assert read.filled_at(record) == pytest.approx(-0.60)
+
+
+def test_a_receipt_with_no_fill_price_falls_back_to_the_limit():
+    record = opened_bwb().__dict__ | {"legs": opened_bwb().legs}
+    assert read.filled_at(record) is None
+    assert read.entry_price(record) == pytest.approx(-0.20)
+    curve, _ = read.payoff_from_record(record)
+    assert min(value for _, value in curve) == pytest.approx(-960.0)
+
+
+def test_the_opened_card_states_the_fill_and_a_worst_case_matching_its_curve(client):
+    session, path = client
+    base = opened_bwb()
+    record = replace(base, outcome=dict(base.outcome, filled_avg_price="-0.60"))
+    write(path, record)
+    page = session.get("/").text
+    assert "filled at -0.60 net" in page
+    # The curve floors at -880, so the stated worst case is 880, not the 960
+    # the receipt priced before the order went out.
+    assert "Worst case 880.00 at expiry" in page
+    assert "960" not in page.split("WHAT WAS OPENED")[1][:600]
 
 
 def test_a_record_with_no_legs_cannot_be_drawn():
@@ -517,7 +551,58 @@ def test_each_day_is_marked_once_as_it_turns(client):
     page = session.get("/").text
     # Two entries on one day produce one day header, not two.
     assert page.count("class='log-day'") == 1
-    assert "2 decisions" in page
+    assert "2 entries" in page
+
+
+def test_the_log_shows_the_receipt_that_retracts_an_earlier_one(client):
+    """A closing figure the ledger later withdrew must not be the last word.
+
+    The page claims to be the append-only record. If it renders the close and
+    hides the correction answering it, the most prominent number in the log is
+    one the agent itself has already withdrawn.
+    """
+    session, path = client
+    write(
+        path,
+        Record(
+            action=Action.POSITION_CLOSED,
+            cycle_id="c1",
+            structure="call_bwb",
+            contracts=10,
+            rationale="Expired. 10 lot(s) were worth -840.00 dollars.",
+        ),
+        Record(
+            action=Action.CORRECTION,
+            cycle_id="c1",
+            structure="call_bwb",
+            rationale="Correction: that entry was canceled at 0/10 filled.",
+        ),
+        Record(
+            action=Action.POSITION_RECONCILED,
+            cycle_id="c1",
+            structure="call_bwb",
+            contracts=6,
+            rationale="Broker fills reconcile call_bwb to -180.00.",
+        ),
+    )
+    page = session.get("/").text
+    log = page[page.index("<div class='log' data-log>"):]
+    log = log[: log.index("append-only")]
+    assert "canceled at 0/10 filled" in log
+    assert "reconcile call_bwb to -180.00" in log
+    assert log.index("-840.00") < log.index("canceled at 0/10 filled")
+
+
+def test_a_correction_is_shown_without_being_counted_as_a_decision(client):
+    """Visible in the log, absent from the decision count. Both matter."""
+    session, path = client
+    write(
+        path,
+        Record(action=Action.STAND_DOWN, cycle_id="c1", rationale="Nothing cleared."),
+        Record(action=Action.CORRECTION, cycle_id="c1", rationale="Seq 1 misread the clock."),
+    )
+    assert session.get("/api/summary").json()["decisions"] == 1
+    assert "misread the clock" in session.get("/").text
 
 
 def test_the_log_scrolls_in_its_own_frame_rather_than_growing_the_page():
