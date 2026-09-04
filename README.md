@@ -1,6 +1,6 @@
 # CONVEX
 
-**A cost-aware, tail-budgeted 0DTE SPY options agent that reaches the market entirely through the Model Context Protocol.**
+**A cost-aware, tail-budgeted 0DTE (zero days to expiration) SPY options agent that reaches the market entirely through the Model Context Protocol.**
 
 
 > ## Start here — hackathon submission
