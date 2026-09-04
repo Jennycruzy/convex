@@ -7,8 +7,7 @@
 >
 > **[Open the live demo →](https://convex.isobars.xyz)**<br>
 > **[Watch the demo video →](https://x.com/jennyoliver57/status/2095880230338453784)**<br>
-> **[Read the one-page build brief →](docs/WRITEUP.md)**<br>
-> **[Download the presentation →](https://convex.isobars.xyz/download/convex-deck)**
+> **[Read the one-page build brief →](docs/WRITEUP.md)**
 >
 > The build brief covers the required **AI logic, risk gates, and Alpaca MCP infrastructure**. The dashboard shows the same system’s decisions, economics, gates, broker outcomes, and append-only receipts.
 

@@ -124,7 +124,7 @@ liquidity:
   # one. Wide books produce a documented refusal, never a desperation fill.
   # `max_relative_spread` is refreshed from the live book at 09:55. It is an
   # observation, not permission to loosen the P&L rule below.
-  max_relative_spread: 0.0311       # MEASURED 2026-09-03 by scripts/calibrate_costs.py
+  max_relative_spread: 0.0380       # MEASURED 2026-09-04 by scripts/calibrate_costs.py
   # Hard policy ceiling validated by the spread-sensitivity replay. Calibration
   # must never turn this into the wider raw-book percentile.
   admission_spread_cap: 0.0100      # VALIDATED P&L admission cap
