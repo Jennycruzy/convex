@@ -554,6 +554,41 @@ def test_each_day_is_marked_once_as_it_turns(client):
     assert "2 entries" in page
 
 
+def test_the_realised_panel_does_not_call_its_pale_line_gross(client):
+    """One page, one meaning for the word.
+
+    Everywhere else gross means before the spread. Here the only cost that can
+    be added back from a receipt is the broker's fee, which is a far smaller
+    number, and labelling it gross makes execution look almost free on the very
+    page arguing it is not.
+    """
+    session, path = client
+    write(
+        path,
+        Record(
+            action=Action.POSITION_RECONCILED,
+            cycle_id="c1",
+            structure="put_bwb",
+            contracts=2,
+            rationale="Settled.",
+            outcome={"realised_pnl": -100.0, "execution_cost": 5.0},
+        ),
+        Record(
+            action=Action.POSITION_RECONCILED,
+            cycle_id="c2",
+            structure="straddle",
+            contracts=2,
+            rationale="Settled.",
+            outcome={"realised_pnl": -50.0, "execution_cost": 2.0},
+        ),
+    )
+    page = session.get("/").text
+    panel = page[page.index("REALISED, THIS ACCOUNT"):page.index("EVERY DECISION")]
+    assert "before fees" in panel
+    assert "-143.00 gross" not in panel
+    assert "before broker fees" in panel
+
+
 def test_the_log_shows_the_receipt_that_retracts_an_earlier_one(client):
     """A closing figure the ledger later withdrew must not be the last word.
 

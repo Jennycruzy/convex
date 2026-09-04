@@ -365,6 +365,7 @@ def equity_svg(
     label: str = "",
     width: int = 940,
     height: int = 320,
+    gross_label: str = "gross",
 ) -> str:
     """Running gross and net over the trades taken, in the order they were taken.
 
@@ -372,6 +373,12 @@ def equity_svg(
     over a whole replay: two lines from a common origin, the pale one gross and
     the solid one net, and the distance between them at the right edge is the
     execution cost of the entire arm.
+
+    ``gross_label`` names that pale line. The replay can honestly call it gross
+    because it prices the same trade twice, once at mid and once after the
+    spread. A caller whose two series differ by something narrower has to say
+    so instead: the word gross is load-bearing on this page and must not mean
+    two different things on two charts.
 
     It draws only what it is given. An empty series is not a flat line at zero,
     which would read as a strategy that traded and broke even; it is a sentence
@@ -471,7 +478,7 @@ def equity_svg(
         f"<text x='{sx(last):.1f}' y='{sy(net[last]) - 12:.1f}' fill='{colour}' "
         f"font-size='12' font-weight='600' text-anchor='end'>{_money(net[last])} net</text>"
         f"<text x='{sx(last):.1f}' y='{sy(gross[last]) - 10:.1f}' fill='var(--ink-dim)' "
-        f"font-size='11' text-anchor='end'>{_money(gross[last])} gross</text>"
+        f"font-size='11' text-anchor='end'>{_money(gross[last])} {gross_label}</text>"
     )
 
     # The denominator, carried next to the chart in the same spirit as the
@@ -494,7 +501,7 @@ def equity_svg(
         f"<text x='{pad_l + 24}' y='{pad_t - 2}' fill='var(--ink-dim)'>net</text>"
         f"<line x1='{pad_l + 60}' y1='{pad_t - 6}' x2='{pad_l + 78}' y2='{pad_t - 6}' "
         f"stroke='var(--ink-faint)' stroke-width='1.5' stroke-dasharray='4 4'/>"
-        f"<text x='{pad_l + 84}' y='{pad_t - 2}' fill='var(--ink-dim)'>gross</text>"
+        f"<text x='{pad_l + 84}' y='{pad_t - 2}' fill='var(--ink-dim)'>{gross_label}</text>"
         f"</g>"
     )
     out.append("</svg>")

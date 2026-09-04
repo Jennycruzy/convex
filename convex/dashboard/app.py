@@ -250,8 +250,14 @@ def _realised_panel(records, summary) -> str:
         "<p>The running result of positions this agent opened and closed, read "
         "back out of the same ledger every other figure on this page comes "
         "from. It is not the replay below and it is not seeded from it.</p>",
+        "<p>The pale line here is <strong>before broker fees</strong>, not "
+        "gross. It is the only cost the broker itemises after the fact, so it "
+        "is the only one that can be added back from a receipt. The spread "
+        "these structures paid to get in and out is already inside the solid "
+        "line and cannot be separated from it: that argument is made on priced "
+        "candidates, in the two panels above and below, not here.</p>",
         "<div class='panel reveal'>",
-        equity_svg(gross_curve, net_curve, label="realised"),
+        equity_svg(gross_curve, net_curve, label="realised", gross_label="before fees"),
     ]
     if net_curve:
         body.append(
